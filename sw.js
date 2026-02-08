@@ -1,4 +1,4 @@
-var CACHE_NAME = 'TERI';
+var CACHE_NAME = 'TERL';
 var urlsToCache = [
     '/apps/pwa/',
     '/apps/pwa/index.html'
