@@ -230,6 +230,8 @@ let worldTension = 0;
 let year = 1;
 let animationFrame;
 let selectedNationId = -1;
+let continentMap = [];
+let mapDirty = true;
 
 // マウス操作用
 let mousePressed = false;
@@ -248,6 +250,39 @@ function isCityNameTaken(name) {
         if (n.cities.some(c => c.name === name)) return true;
     }
     return false;
+}
+
+function updateContinents() {
+    continentMap = new Array(width * height).fill(-1);
+    let currentContinentId = 0;
+    
+    for (let i = 0; i < width * height; i++) {
+        // Skip water or already visited
+        if (grid[i] === 0 || continentMap[i] !== -1) continue;
+        
+        // Start BFS
+        let queue = [i];
+        continentMap[i] = currentContinentId;
+        
+        while(queue.length > 0) {
+            let curr = queue.shift();
+            let cx = curr % width;
+            let cy = Math.floor(curr / width);
+            
+            [[0,1],[0,-1],[1,0],[-1,0]].forEach(([dx, dy]) => {
+                let nx = cx + dx;
+                let ny = cy + dy;
+                if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
+                    let nIdx = ny * width + nx;
+                    if (grid[nIdx] !== 0 && continentMap[nIdx] === -1) {
+                        continentMap[nIdx] = currentContinentId;
+                        queue.push(nIdx);
+                    }
+                }
+            });
+        }
+        currentContinentId++;
+    }
 }
 
 /**
@@ -287,6 +322,7 @@ function initGrid(size) {
     height = size;
     grid = new Array(width * height).fill(0);
     ownerGrid = new Array(width * height).fill(-1);
+    continentMap = new Array(width * height).fill(-1);
     nations = [];
     isDrawing = true;
     year = 1;
@@ -402,6 +438,7 @@ function handleDraw(e) {
             // mousemove中に塗りつぶしを連打すると重いので、mousedownの時だけにする工夫が必要
             if (e.type === 'mousedown' || e.type === 'touchstart') {
                 floodFill(x, y, targetType);
+                mapDirty = true;
             }
         } else {
             // ブラシサイズ（少し太く）
@@ -411,7 +448,10 @@ function handleDraw(e) {
                     const ny = y+dy;
                     if(nx>=0 && nx<width && ny>=0 && ny<height){
                         const idx = ny * width + nx;
-                        grid[idx] = targetType;
+                        if (grid[idx] !== targetType) {
+                            grid[idx] = targetType;
+                            mapDirty = true;
+                        }
                     }
                 }
             }
@@ -511,6 +551,9 @@ function generateWorld() {
 
     // 2. 国家生成
     spawnNations();
+    
+    // 3. 大陸情報の更新
+    updateContinents();
 
     log("世界が生成されました。歴史が始まります。", "log-info");
 }
@@ -1192,8 +1235,25 @@ function handlePolitics(n) {
             declareIndependence(n);
         }
         // 2. 機会主義的独立 (宗主国が不安定かつ自国が安定)
-        else if (n.stability > 70 && master.stability < 30 && Math.random() < 0.005) {
-            declareIndependence(n);
+        else {
+            // 海を隔てているかチェック
+            let isSeparated = false;
+            if (n.tiles.length > 0 && master.tiles.length > 0) {
+                 const myTile = n.cities.length > 0 ? n.cities[0].tileIdx : n.tiles[0];
+                 const masterTile = master.cities.length > 0 ? master.cities[0].tileIdx : master.tiles[0];
+                 // Check if continent map is valid (not -1) and different
+                 if (continentMap[myTile] !== -1 && continentMap[masterTile] !== -1 && continentMap[myTile] !== continentMap[masterTile]) {
+                     isSeparated = true;
+                 }
+            }
+
+            // 海を隔てている場合、独立確率が大幅に上昇し、宗主国の安定度条件が緩和される
+            let independenceThreshold = isSeparated ? 60 : 30; // 宗主国の安定度が60未満でも独立チャンス
+            let chance = isSeparated ? 0.02 : 0.005;
+
+            if (n.stability > 70 && master.stability < independenceThreshold && Math.random() < chance) {
+                declareIndependence(n);
+            }
         }
     }
 
@@ -1243,6 +1303,11 @@ function handlePolitics(n) {
             const dy = Math.floor(city.tileIdx / width) - Math.floor(capital.tileIdx / width);
             const dist = Math.sqrt(dx*dx + dy*dy);
             cityUnrest += dist / 5;
+
+            // 海を隔てている場合のペナルティ (非常に大きい)
+            if (continentMap[city.tileIdx] !== -1 && continentMap[capital.tileIdx] !== -1 && continentMap[city.tileIdx] !== continentMap[capital.tileIdx]) {
+                cityUnrest += 25; 
+            }
         }
         city.unrest = clamp(cityUnrest, 0, 100);
     });
@@ -1618,7 +1683,15 @@ function triggerCityRebellion(n, cities) {
 }
 
 function simulateTick() {
+    if (mapDirty) {
+        updateContinents();
+        mapDirty = false;
+    }
+
     let totalPop = 0;
+    let totalLandTiles = 0;
+    for(let i=0; i<grid.length; i++) if(grid[i] !== 0) totalLandTiles++;
+
     // 緊張感の自然減衰
     worldTension = Math.max(0, worldTension - 0.2);
 
@@ -1717,8 +1790,42 @@ function simulateTick() {
     document.getElementById('info-pop').innerText = formatNum(totalPop);
 
     // 2. 外交フェーズ
+    let hegemonId = -1;
+    if (totalLandTiles > 0) {
+        nations.forEach(n => {
+            if (!n.isDead && n.tiles.length / totalLandTiles > 0.666) {
+                hegemonId = n.id;
+            }
+        });
+    }
+
     nations.forEach(n => {
         if (n.isDead) return;
+
+        // 覇権国（世界の2/3を支配）の場合、秩序維持モード
+        if (n.id === hegemonId) {
+            // 他国の戦争に介入して停戦させる (仲介)
+            nations.forEach(other => {
+                if (other.id !== n.id && !other.isDead && other.atWarWith.length > 0) {
+                    // 自分との戦争は除く
+                    const enemies = other.atWarWith.filter(eId => eId !== n.id);
+                    enemies.forEach(eId => {
+                        const enemy = nations.find(en => en.id === eId);
+                        if (enemy && !enemy.isDead) {
+                            // 強制的に白紙講和
+                            // Log only once per pair (check if they are still at war)
+                            if (other.atWarWith.includes(eId)) {
+                                concludePeace(other, enemy, 'WHITE_PEACE');
+                                log(`秩序維持: 覇権国${n.name}の仲介により、${other.name}と${enemy.name}は停戦しました。`, "log-peace");
+                            }
+                        }
+                    });
+                }
+            });
+            
+            // 覇権国は自ら宣戦布告しない（反乱鎮圧などは除く）
+            return;
+        }
 
         // 外交併合: 傀儡国を併合
         if (!n.isPuppet) {
@@ -1780,7 +1887,7 @@ function simulateTick() {
 
         // 戦争判定 (閾値を下げ、好戦的に)
         // 隣接しているか、あるいは海軍力があり両者が沿岸国であれば宣戦布告可能
-        const canNavalInvade = (n.tech >= 2 && n.ships >= 5 && n.isCoastal() && target.isCoastal());
+        const canNavalInvade = (n.tech >= 3 && n.ships >= 20 && n.isCoastal() && target.isCoastal());
         
         if (n.relations[target.id] < -50 && (neighbor || canNavalInvade)) {
             if (!n.atWarWith.includes(target.id)) {
@@ -1862,7 +1969,7 @@ function simulateTick() {
                 battle(attacker, defender);
             } else {
                 // 非隣接国への上陸作戦
-                if (attacker.tech >= 2 && Math.random() < 0.1) {
+                if (attacker.tech >= 3 && Math.random() < 0.1) {
                     navalLanding(attacker, defender);
                 }
             }
@@ -2228,7 +2335,7 @@ function battle(attacker, defender) {
 
 function navalLanding(attacker, defender) {
     if (!attacker.isCoastal() || !defender.isCoastal()) return;
-    if (attacker.ships < 5) return; // ある程度の海軍力が必要
+    if (attacker.ships < 20) return; // ある程度の海軍力が必要
 
     const atkNaval = attacker.getNavalPower() * (0.8 + Math.random()*0.4);
     const defNaval = defender.getNavalPower() * (0.8 + Math.random()*0.4);
