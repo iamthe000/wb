@@ -582,7 +582,7 @@ class Nation {
         this.tech = 0; // Index of TECH_LEVELS
         
         // Politics
-        const startGovs = ["絶対王政", "共和制", "帝国", "公国", "連邦制"];
+        const startGovs = ["絶対王政", "多党民主制", "二大政党民主制", "帝国", "公国", "連邦制"];
         this.govType = startGovs[Math.floor(Math.random() * startGovs.length)];
         this.updateName();
         this.stability = 100;
@@ -650,11 +650,22 @@ class Nation {
     updateName() {
         let proposedName = "";
         if (this.isPuppet) {
-            proposedName = this.baseName + "傀儡統治機構国";
+            let masterName = "";
+            if (this.masterId !== -1) {
+                const master = nations.find(m => m.id === this.masterId);
+                if (master) masterName = master.name;
+            }
+            if (masterName) {
+                proposedName = masterName + "領" + this.baseName;
+            } else {
+                proposedName = this.baseName + "傀儡統治機構国";
+            }
         } else {
             const suffixes = {
                 "絶対王政": "王国",
-                "共和制": "共和国",
+                "多党民主制": "共和国",
+                "二大政党民主制": "合衆国",
+                "共和制": "共和国", // Legacy
                 "帝国": "帝国",
                 "公国": "公国",
                 "連邦制": "連邦",
@@ -666,7 +677,7 @@ class Nation {
             };
             let suffix = suffixes[this.govType] || "国";
             
-            if (this.govType === "共和制" && this.regimeNumber > 1) {
+            if ((this.govType === "多党民主制" || this.govType === "二大政党民主制" || this.govType === "共和制") && this.regimeNumber > 1) {
                 proposedName = this.baseName + suffix + "第" + this.regimeNumber + "政";
             } else {
                 proposedName = this.baseName + suffix;
@@ -692,6 +703,14 @@ class Nation {
                 }
             }
             this.name = finalName;
+        }
+
+        if (!this.isPuppet) {
+            nations.forEach(n => {
+                if (n.isPuppet && n.masterId === this.id) {
+                    n.updateName();
+                }
+            });
         }
     }
 
@@ -1037,7 +1056,11 @@ function handlePolitics(n) {
     if (Math.random() < 0.005) {
         const oldLeader = n.leader;
         n.leader = n.generateLeaderName();
-        const stabChange = Math.floor(Math.random() * 30) - 20; // -20 to +10
+        let stabChange = Math.floor(Math.random() * 30) - 20; // -20 to +10
+        // 二大政党民主制は指導者交代時の安定度低下が大きい
+        if (n.govType === "二大政党民主制") {
+            stabChange -= 15;
+        }
         n.stability = clamp(n.stability + stabChange, 0, 100);
         log(`${n.name}の指導者が${oldLeader}から${n.leader}に交代しました。(安定度: ${stabChange > 0 ? "+" : ""}${stabChange})`, "log-info");
         n.addHistory(`指導者交代: ${oldLeader} -> ${n.leader}`);
@@ -1118,14 +1141,14 @@ function handlePolitics(n) {
         n.addHistory(`政変: ${oldGov} -> ${n.govType} (${oldName} -> ${n.name})`);
     }
 
-    // 共和制への移行
-    if (n.govType !== "共和制" && n.tech >= 3 && n.stability > 80 && Math.random() < 0.001) {
+    // 民主制への移行
+    if (!["多党民主制", "二大政党民主制", "共和制"].includes(n.govType) && n.tech >= 3 && n.stability > 80 && Math.random() < 0.001) {
         const oldName = n.name;
-        n.govType = "共和制";
+        n.govType = (Math.random() < 0.5) ? "多党民主制" : "二大政党民主制";
         n.regimeNumber++;
         n.updateName();
-        log(`${oldName}は近代化に伴い共和制へ移行し、${n.name}となりました。`, "log-peace");
-        n.addHistory(`共和制移行: ${oldName} -> ${n.name}`);
+        log(`${oldName}は近代化に伴い民主化し、${n.name}となりました。`, "log-peace");
+        n.addHistory(`民主化: ${oldName} -> ${n.name}`);
     }
 
     // 平和的独立 (低確率)
@@ -1143,7 +1166,7 @@ function handlePolitics(n) {
     if (n.isRebel && n.stability > 70 && n.tiles.length > 25 && Math.random() < 0.01) {
         n.isRebel = false;
         const oldName = n.name;
-        const newGovs = ["共和制", "帝国", "連邦制"];
+        const newGovs = ["多党民主制", "二大政党民主制", "帝国", "連邦制"];
         n.govType = newGovs[Math.floor(Math.random() * newGovs.length)];
         n.updateName();
         log(`${oldName}は安定した統治を確立し、${n.name}として国家の正統性を主張し始めました。`, "log-peace");
@@ -1277,9 +1300,9 @@ function triggerCityRebellion(n, cities) {
         { name: "人民委員会", gov: "革命政府" }
     ];
     
-    // 特別な名称: 共和国第n政 (親が共和国の場合)
-    if (n.govType === "共和制" && Math.random() < 0.4) {
-        rebel.govType = "共和制";
+    // 特別な名称: 共和国第n政 (親が民主制の場合)
+    if (["共和制", "多党民主制", "二大政党民主制"].includes(n.govType) && Math.random() < 0.4) {
+        rebel.govType = n.govType;
         rebel.regimeNumber = n.regimeNumber + 1;
         rebel.updateName();
     } else {
@@ -1367,6 +1390,43 @@ function simulateTick() {
         if (n.isDead) return;
         
         handlePolitics(n);
+
+        // 未開拓地の植民
+        if (Math.random() < 0.05) { // 5% chance per tick
+            // ランダムに領土をピックして、隣接する未開拓地(ownerGrid == -1)を探す
+            const sampleTiles = [];
+            for(let i=0; i<10; i++) {
+                if (n.tiles.length > 0) {
+                    sampleTiles.push(n.tiles[Math.floor(Math.random() * n.tiles.length)]);
+                }
+            }
+            
+            for(const tIdx of sampleTiles) {
+                const cx = tIdx % width;
+                const cy = Math.floor(tIdx / width);
+                let done = false;
+                
+                const neighbors = [[0,1],[0,-1],[1,0],[-1,0]];
+                // ランダムな順序で試す
+                neighbors.sort(() => Math.random() - 0.5);
+
+                for(const [dx, dy] of neighbors) {
+                    let nx=cx+dx, ny=cy+dy;
+                    if(nx>=0 && nx<width && ny>=0 && ny<height) {
+                        let nIdx = ny*width+nx;
+                        if(ownerGrid[nIdx] === -1 && grid[nIdx] === 1) { // 未所属の陸地
+                            ownerGrid[nIdx] = n.id;
+                            n.tiles.push(nIdx);
+                            // コスト
+                            n.gdp = Math.max(0, n.gdp - 5);
+                            done = true;
+                            break;
+                        }
+                    }
+                }
+                if(done) break;
+            }
+        }
 
         // 都市の建設
         if (n.tiles.length > (n.cities.length + 1) * 50 && Math.random() < 0.05) {
@@ -1482,7 +1542,10 @@ function simulateTick() {
         n.relations[target.id] = clamp(n.relations[target.id] + change, -100, 100);
 
         // 戦争判定 (閾値を下げ、好戦的に)
-        if (n.relations[target.id] < -50 && neighbor) {
+        // 隣接しているか、あるいは海軍力があり両者が沿岸国であれば宣戦布告可能
+        const canNavalInvade = (n.tech >= 2 && n.ships >= 5 && n.isCoastal() && target.isCoastal());
+        
+        if (n.relations[target.id] < -50 && (neighbor || canNavalInvade)) {
             if (!n.atWarWith.includes(target.id)) {
                 // 傀儡国は主人に逆らわない
                 if (n.isPuppet && n.masterId === target.id) return;
@@ -1493,7 +1556,7 @@ function simulateTick() {
         }
 
         // 野心による開戦 (圧倒的有利な場合)
-        if (neighbor && n.getMilitaryPower() > target.getMilitaryPower() * 2 && Math.random() < 0.05) {
+        if ((neighbor || canNavalInvade) && n.getMilitaryPower() > target.getMilitaryPower() * 2 && Math.random() < 0.05) {
             if (!n.atWarWith.includes(target.id)) {
                 // 傀儡国は主人に逆らわない
                 if (n.isPuppet && n.masterId === target.id) return;
