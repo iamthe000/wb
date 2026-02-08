@@ -53,6 +53,56 @@ if ('serviceWorker' in navigator) {
     <button onclick="document.getElementById('history-modal').style.display='none'" style="margin-top:15px;">閉じる</button>
 </div>
 
+<div id="rulebook-modal" style="display:none; position:fixed; top:50%; left:50%; transform:translate(-50%, -50%); background:#222; border:1px solid #444; padding:20px; z-index:1000; width:600px; max-height:80vh; overflow-y:auto; box-shadow: 0 0 20px rgba(0,0,0,0.8); font-size: 0.9em; line-height: 1.6;">
+    <h2 style="margin-top:0; border-bottom:1px solid #555; padding-bottom:5px;">ルールブック & システム詳細</h2>
+    
+    <h3>基本操作</h3>
+    <p>
+        <strong>マップデザイン:</strong> 左クリック/タッチで地形を描画、右クリックで消去。「塗りつぶしモード」で領域を一括変更可能です。<br>
+        <strong>シミュレーション:</strong> 「世界を生成」で歴史が始まります。速度バーで進行速度を調整、一時停止も可能です。
+    </p>
+
+    <h3>国家ステータス</h3>
+    <p>
+        <strong>安定度 (Stability):</strong> 国家の存続に関わる最重要パラメータ。低いと内戦や政変が発生します。戦争やイベントで低下します。<br>
+        <strong>技術 (Technology):</strong> 5段階（原始的〜未来的）。技術レベルが高いほど、人口支持力、GDP成長率、軍事力が向上します。<br>
+        <strong>GDP & 産業:</strong> 経済力。軍事費の源泉となります。<br>
+        <strong>政治体制:</strong> 民主主義、権威主義、全体主義の3大区分に加え、詳細な統治形態（議院内閣制、軍事政権など）が設定されます。
+    </p>
+
+    <h3>軍事と戦争</h3>
+    <p>
+        <strong>陸軍:</strong> 人口とGDPに基づいて徴兵・維持されます。<br>
+        <strong>海軍:</strong> 技術レベル2以上、かつ沿岸都市を持つ国家のみが建造可能です。<br>
+        <strong>上陸作戦:</strong> <strong>技術レベル3（現代的）以上</strong>かつ<strong>軍艦20隻以上</strong>を保有する国家のみ、海を越えた敵国への上陸侵攻が可能です。<br>
+        <strong>戦争:</strong> 隣接国との関係悪化や野心によって発生します。
+    </p>
+
+    <h3>内戦と独立</h3>
+    <p>
+        <strong>都市反乱:</strong> 首都から遠い都市、特に<strong>海を隔てた別大陸にある都市</strong>は不満を持ちやすく（+25ペナルティ）、反乱を起こすリスクが高まります。<br>
+        <strong>傀儡国の独立:</strong> 宗主国が不安定になると独立を画策します。<strong>海を隔てている場合</strong>、独立確率は4倍になり、必要な宗主国の不安定度条件も緩和されます。<br>
+        <strong>反乱軍:</strong> 成功すれば正統政府として認められる可能性があります。
+    </p>
+
+    <h3>講和条約の種類</h3>
+    <ul>
+        <li><strong>白紙講和:</strong> 国境変更なしで停戦。</li>
+        <li><strong>領土割譲:</strong> 一部の都市や土地を勝者に割譲。</li>
+        <li><strong>国境地帯併合:</strong> 接している国境地帯をごっそり奪う。</li>
+        <li><strong>傀儡化:</strong> 敗戦国を従属させ、主権を奪う。</li>
+    </ul>
+
+    <h3>覇権国の秩序維持 (Pax Hegemonica)</h3>
+    <p>
+        世界の<strong>陸地面積の2/3以上</strong>を支配する超大国が現れると、その国は「覇権国」とみなされます。<br>
+        覇権国は自ら侵略戦争を行わなくなり、代わりに他国の紛争に介入して強制的に停戦させる「秩序維持」行動をとります。<br>
+        ただし、領土が2/3を下回ると再び覇権争いに戻ります。
+    </p>
+
+    <button onclick="document.getElementById('rulebook-modal').style.display='none'" style="margin-top:15px; width: 100%;">閉じる</button>
+</div>
+
 <div id="container">
     <div id="canvas-container">
         <canvas id="gameCanvas"></canvas>
@@ -121,6 +171,8 @@ if ('serviceWorker' in navigator) {
             <h2>イベントログ</h2>
             <div id="log"></div>
         </div>
+        
+        <button id="btn-rulebook" style="margin-top: auto; background: #2c3e50; border-color: #4a69bd;">📖 ルールブック / システム解説</button>
     </div>
 </div>
 
@@ -419,6 +471,10 @@ function setupInput() {
         });
         
         document.getElementById('history-modal').style.display = 'block';
+    });
+
+    document.getElementById('btn-rulebook').addEventListener('click', () => {
+        document.getElementById('rulebook-modal').style.display = 'block';
     });
 }
 
