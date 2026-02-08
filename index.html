@@ -1,0 +1,768 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>Fantasy World Simulator</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #222; color: white; font-family: 'Segoe UI', sans-serif; }
+        #container { display: flex; height: 100vh; }
+        #canvas-container { flex: 1; position: relative; cursor: crosshair; }
+        canvas { display: block; image-rendering: pixelated; }
+        #sidebar { width: 320px; background: #333; padding: 20px; overflow-y: auto; box-shadow: -2px 0 5px rgba(0,0,0,0.5); display: flex; flex-direction: column; gap: 15px; }
+        
+        h1, h2 { margin: 0 0 10px 0; color: #4db8ff; }
+        .panel { background: #444; padding: 10px; border-radius: 5px; }
+        button { background: #4db8ff; border: none; padding: 10px; color: #000; font-weight: bold; cursor: pointer; width: 100%; margin-top: 5px; border-radius: 3px; }
+        button:hover { background: #7cccff; }
+        button:disabled { background: #666; cursor: not-allowed; }
+        
+        .stat-row { display: flex; justify-content: space-between; font-size: 0.9em; margin-bottom: 3px; }
+        .bar-bg { background: #222; height: 6px; border-radius: 3px; overflow: hidden; margin-bottom: 8px; }
+        .bar-fill { height: 100%; background: #ccc; }
+        
+        #log { font-size: 0.8em; height: 150px; overflow-y: auto; background: #111; padding: 5px; font-family: monospace; border: 1px solid #555; }
+        .log-war { color: #ff6b6b; }
+        .log-peace { color: #51cf66; }
+        .log-info { color: #aaa; }
+        
+        /* Tooltip style overlay */
+        #hover-info { position: absolute; background: rgba(0,0,0,0.8); padding: 5px; pointer-events: none; border-radius: 4px; display: none; font-size: 0.8em; z-index: 10; border: 1px solid #666; }
+    </style>
+</head>
+<body>
+
+<div id="container">
+    <div id="canvas-container">
+        <canvas id="gameCanvas"></canvas>
+        <div id="hover-info"></div>
+    </div>
+    
+    <div id="sidebar">
+        <h1>World Sim</h1>
+        
+        <div id="menu-panel" class="panel">
+            <h2>1. Map Design</h2>
+            <p>左クリック: 陸地を描く<br>右クリック: 海に戻す</p>
+            <div>
+                サイズ: <select id="mapSize">
+                    <option value="64">小 (64x64)</option>
+                    <option value="128" selected>中 (128x128)</option>
+                    <option value="256">大 (256x256)</option>
+                </select>
+            </div>
+            <button id="btn-generate">世界を生成 (シミュレーション開始)</button>
+        </div>
+
+        <div id="sim-panel" class="panel" style="display:none;">
+            <h2>2. World Info</h2>
+            <div class="stat-row"><span>Year:</span> <span id="info-year">1</span></div>
+            <div class="stat-row"><span>Total Pop:</span> <span id="info-pop">0</span></div>
+            <button id="btn-pause">一時停止 / 再開</button>
+        </div>
+
+        <div id="nation-panel" class="panel" style="display:none;">
+            <h2 id="n-name">Nation Name</h2>
+            <div class="stat-row"><span>Religion:</span> <span id="n-religion"></span></div>
+            <div class="stat-row"><span>Tech:</span> <span id="n-tech"></span></div>
+            
+            <hr style="border-color:#555">
+            
+            <div class="stat-row"><span>GDP:</span> <span id="n-gdp"></span></div>
+            <div class="bar-bg"><div id="bar-gdp" class="bar-fill" style="width:0; background:#f1c40f"></div></div>
+            
+            <div class="stat-row"><span>Population:</span> <span id="n-pop"></span></div>
+            <div class="bar-bg"><div id="bar-pop" class="bar-fill" style="width:0; background:#2ecc71"></div></div>
+            
+            <div class="stat-row"><span>Military:</span> <span id="n-mil"></span></div>
+            <div class="bar-bg"><div id="bar-mil" class="bar-fill" style="width:0; background:#e74c3c"></div></div>
+
+            <div class="stat-row"><span>Industry:</span> <span id="n-ind"></span></div>
+            <div class="stat-row"><span>Tanks:</span> <span id="n-tanks"></span></div>
+            <div class="stat-row"><span>Quality:</span> <span id="n-qual"></span></div>
+        </div>
+
+        <div class="panel">
+            <h2>Event Log</h2>
+            <div id="log"></div>
+        </div>
+    </div>
+</div>
+
+<script>
+/**
+ * 定数と設定
+ */
+const TILE_SIZE = 6; // 描画時の1タイルのピクセルサイズ
+const COLORS = {
+    WATER: '#1a3c6e',
+    LAND: '#4caf50',
+    MOUNTAIN: '#5d4037',
+    RIVER: '#4fc3f7',
+    SNOW: '#fff'
+};
+const RELIGIONS = ['Sun God', 'Sea Spirits', 'Machine Cult', 'Nature Order', 'Chaos', 'Void'];
+const TECH_LEVELS = ['Primitive', 'Agrarian', 'Industrial', 'Modern', 'Futuristic'];
+
+// グローバル変数
+let canvas, ctx, width, height;
+let grid = []; // 0:Water, 1:Land, 2:Mountain, 3:River
+let ownerGrid = []; // ID of the nation owning this tile (-1 for none)
+let nations = [];
+let isDrawing = true;
+let isPaused = false;
+let year = 1;
+let animationFrame;
+let selectedNationId = -1;
+
+// マウス操作用
+let mousePressed = false;
+let mouseButton = 0; // 0:Left, 2:Right
+
+/**
+ * 初期化
+ */
+window.onload = () => {
+    canvas = document.getElementById('gameCanvas');
+    ctx = canvas.getContext('2d');
+    
+    // キャンバスサイズ調整
+    resizeCanvas();
+    window.addEventListener('resize', resizeCanvas);
+
+    // グリッド初期化 (中サイズデフォルト)
+    initGrid(128);
+
+    // イベントリスナー
+    setupInput();
+    
+    // ループ開始
+    loop();
+};
+
+function resizeCanvas() {
+    const container = document.getElementById('canvas-container');
+    canvas.width = container.clientWidth;
+    canvas.height = container.clientHeight;
+}
+
+function initGrid(size) {
+    width = size;
+    height = size;
+    grid = new Array(width * height).fill(0);
+    ownerGrid = new Array(width * height).fill(-1);
+    nations = [];
+    isDrawing = true;
+    year = 1;
+    document.getElementById('log').innerHTML = '';
+}
+
+/**
+ * 入力処理
+ */
+function setupInput() {
+    // 描画ツール
+    canvas.addEventListener('mousedown', e => {
+        mousePressed = true;
+        mouseButton = e.button;
+        handleDraw(e);
+        handleSelect(e);
+    });
+    canvas.addEventListener('mousemove', e => {
+        handleDraw(e);
+        handleHover(e);
+    });
+    window.addEventListener('mouseup', () => mousePressed = false);
+    
+    // 右クリックメニュー無効化
+    canvas.addEventListener('contextmenu', e => e.preventDefault());
+
+    // UIボタン
+    document.getElementById('mapSize').addEventListener('change', (e) => {
+        initGrid(parseInt(e.target.value));
+    });
+
+    document.getElementById('btn-generate').addEventListener('click', () => {
+        generateWorld();
+    });
+
+    document.getElementById('btn-pause').addEventListener('click', () => {
+        isPaused = !isPaused;
+    });
+}
+
+/**
+ * 描画モードの処理
+ */
+function handleDraw(e) {
+    if (!mousePressed || !isDrawing) return;
+    
+    const rect = canvas.getBoundingClientRect();
+    const x = Math.floor((e.clientX - rect.left - canvas.width/2 + (width*TILE_SIZE)/2) / TILE_SIZE);
+    const y = Math.floor((e.clientY - rect.top - canvas.height/2 + (height*TILE_SIZE)/2) / TILE_SIZE);
+
+    if (x >= 0 && x < width && y >= 0 && y < height) {
+        // ブラシサイズ（少し太く）
+        for(let dy=-1; dy<=1; dy++){
+            for(let dx=-1; dx<=1; dx++){
+                const nx = x+dx;
+                const ny = y+dy;
+                if(nx>=0 && nx<width && ny>=0 && ny<height){
+                    const idx = ny * width + nx;
+                    grid[idx] = (mouseButton === 0) ? 1 : 0; // 左:陸, 右:海
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 選択とホバー
+ */
+function handleSelect(e) {
+    if (isDrawing) return;
+    const {x, y} = getGridPos(e);
+    if (x >= 0 && x < width && y >= 0 && y < height) {
+        const idx = y * width + x;
+        const owner = ownerGrid[idx];
+        if (owner !== -1) {
+            selectedNationId = owner;
+            updateNationPanel();
+            document.getElementById('nation-panel').style.display = 'block';
+        } else {
+            document.getElementById('nation-panel').style.display = 'none';
+            selectedNationId = -1;
+        }
+    }
+}
+
+function handleHover(e) {
+    const hoverInfo = document.getElementById('hover-info');
+    if (isDrawing) {
+        hoverInfo.style.display = 'none';
+        return;
+    }
+    
+    const {x, y} = getGridPos(e);
+    if (x >= 0 && x < width && y >= 0 && y < height) {
+        const idx = y * width + x;
+        const owner = ownerGrid[idx];
+        if (owner !== -1) {
+            const n = nations.find(nat => nat.id === owner);
+            if(n) {
+                hoverInfo.style.display = 'block';
+                hoverInfo.style.left = (e.clientX + 10) + 'px';
+                hoverInfo.style.top = (e.clientY + 10) + 'px';
+                hoverInfo.innerHTML = `<b>${n.name}</b><br>Pop: ${formatNum(n.pop)}`;
+                return;
+            }
+        }
+    }
+    hoverInfo.style.display = 'none';
+}
+
+function getGridPos(e) {
+    const rect = canvas.getBoundingClientRect();
+    const x = Math.floor((e.clientX - rect.left - canvas.width/2 + (width*TILE_SIZE)/2) / TILE_SIZE);
+    const y = Math.floor((e.clientY - rect.top - canvas.height/2 + (height*TILE_SIZE)/2) / TILE_SIZE);
+    return {x, y};
+}
+
+/**
+ * ワールド生成ロジック
+ */
+function generateWorld() {
+    isDrawing = false;
+    document.getElementById('menu-panel').style.display = 'none';
+    document.getElementById('sim-panel').style.display = 'block';
+
+    // 1. 地形補正 (山と川)
+    generateTerrainFeatures();
+
+    // 2. 国家生成
+    spawnNations();
+
+    log("World Generated. History begins.", "log-info");
+}
+
+function generateTerrainFeatures() {
+    // 海岸線からの距離マップを作成
+    let distMap = new Array(width * height).fill(0);
+    // 簡易的な距離計算 (数回ループさせる)
+    for(let i=0; i<3; i++) {
+        for(let y=0; y<height; y++) {
+            for(let x=0; x<width; x++) {
+                let idx = y*width+x;
+                if(grid[idx] === 0) { distMap[idx] = 0; continue; }
+                
+                let minNeighbor = 999;
+                // 上下左右を見る
+                if(x>0) minNeighbor = Math.min(minNeighbor, distMap[y*width+(x-1)]);
+                else minNeighbor = 0;
+                if(x<width-1) minNeighbor = Math.min(minNeighbor, distMap[y*width+(x+1)]);
+                else minNeighbor = 0;
+                if(y>0) minNeighbor = Math.min(minNeighbor, distMap[(y-1)*width+x]);
+                else minNeighbor = 0;
+                if(y<height-1) minNeighbor = Math.min(minNeighbor, distMap[(y+1)*width+x]);
+                else minNeighbor = 0;
+                
+                distMap[idx] = minNeighbor + 1;
+            }
+        }
+    }
+
+    // 山の生成 (内陸部)
+    for(let i=0; i<width*height; i++) {
+        if(grid[i] === 1 && distMap[i] > 3) {
+            if(Math.random() < 0.3) grid[i] = 2; // Mountain
+        }
+    }
+
+    // 川の生成 (山から海へ)
+    // 簡易的なランダムウォーク
+    let rivers = 0;
+    for(let i=0; i<width*height; i++) {
+        if(grid[i] === 2 && Math.random() < 0.05) { // 山の起点
+            let cx = i % width;
+            let cy = Math.floor(i / width);
+            let path = [];
+            let life = 100;
+            while(life > 0) {
+                path.push(cy*width+cx);
+                // 周囲で最も標高(distMap)が低いところへ
+                let candidates = [];
+                let bestH = distMap[cy*width+cx];
+                
+                [[0,1],[0,-1],[1,0],[-1,0]].forEach(([dx, dy]) => {
+                    let nx=cx+dx, ny=cy+dy;
+                    if(nx>=0 && nx<width && ny>=0 && ny<height) {
+                        let h = distMap[ny*width+nx];
+                        if (h < bestH) { candidates = [{x:nx, y:ny, h:h}]; bestH = h; }
+                        else if (h === bestH) { candidates.push({x:nx, y:ny, h:h}); }
+                    }
+                });
+
+                if(candidates.length === 0) break; // 窪地
+                let next = candidates[Math.floor(Math.random()*candidates.length)];
+                cx = next.x; cy = next.y;
+                
+                let idx = cy*width+cx;
+                if(grid[idx] === 0) break; // 海に到達
+                if(grid[idx] !== 2) grid[idx] = 3; // 川にする
+                life--;
+            }
+        }
+    }
+}
+
+/**
+ * 国家クラス
+ */
+class Nation {
+    constructor(id, x, y) {
+        this.id = id;
+        this.color = `hsl(${Math.random()*360}, 70%, 50%)`;
+        this.name = this.generateName();
+        this.religion = RELIGIONS[Math.floor(Math.random() * RELIGIONS.length)];
+        
+        // Stats
+        this.pop = 1000 + Math.floor(Math.random() * 5000);
+        this.gdp = 100 + Math.floor(Math.random() * 900); // 1人あたりではない、国力ベース
+        this.industry = 10 + Math.floor(Math.random() * 50);
+        this.tech = 0; // Index of TECH_LEVELS
+        
+        // Military
+        this.soldiers = Math.floor(this.pop * 0.1);
+        this.soldierQuality = 0.5 + Math.random(); // 0.5 - 1.5
+        this.equipQuality = 0.5 + Math.random();
+        this.tanks = 0;
+        
+        // Diplomacy
+        this.relations = {}; // { nationId: value (-100 to 100) }
+        this.atWarWith = []; // list of nation IDs
+        this.isDead = false;
+        
+        // 初期領土
+        ownerGrid[y * width + x] = id;
+        this.tiles = [y * width + x];
+    }
+
+    generateName() {
+        const syl = ["Ar", "Ban", "Ci", "Dor", "El", "Fa", "Gor", "Hun", "Il", "Jo", "Ka", "Lor", "Mi", "Nor", "Pa", "Qu", "Ro", "Sa", "Ti", "Ur", "Va", "Xi", "Zu"];
+        return syl[Math.floor(Math.random()*syl.length)] + syl[Math.floor(Math.random()*syl.length)] + (Math.random()>0.5 ? "ia" : "land");
+    }
+
+    getMilitaryPower() {
+        // 軍事力計算式: 兵数 * 質 * 装備 * (戦車ボーナス)
+        let tankBonus = 1 + (this.tanks * 0.05);
+        return this.soldiers * this.soldierQuality * this.equipQuality * tankBonus * (1 + this.tech * 0.5);
+    }
+}
+
+function spawnNations() {
+    let landTiles = [];
+    for(let i=0; i<grid.length; i++) {
+        if(grid[i] === 1) landTiles.push(i);
+    }
+
+    // 土地の広さに応じて国家数を決定
+    const numNations = Math.max(2, Math.floor(landTiles.length / 50)); 
+    
+    for(let i=0; i<numNations; i++) {
+        if(landTiles.length === 0) break;
+        // ランダムな陸地を選ぶ
+        let rndIdx = Math.floor(Math.random() * landTiles.length);
+        let tileIdx = landTiles[rndIdx];
+        landTiles.splice(rndIdx, 1);
+        
+        let y = Math.floor(tileIdx / width);
+        let x = tileIdx % width;
+        
+        // 既に誰かの領土ならスキップ（初期配置は離す）
+        if(ownerGrid[tileIdx] !== -1) continue;
+        
+        nations.push(new Nation(i, x, y));
+    }
+    
+    // 初期領土拡大 (Flood fill的)
+    expandTerritoryInitial();
+}
+
+function expandTerritoryInitial() {
+    // 簡易的に各国の周囲を埋める
+    let changed = true;
+    let loopCount = 0;
+    while(changed && loopCount < 20) {
+        changed = false;
+        let newOwners = [...ownerGrid];
+        
+        // ランダムな順序で処理するためにシャッフル
+        let indices = Array.from({length: width*height}, (_, i) => i);
+        indices.sort(() => Math.random() - 0.5);
+
+        for(let i of indices) {
+            if(grid[i] === 0) continue; // 海は無視
+            if(ownerGrid[i] !== -1) continue; // 所有者あり
+
+            // 隣接タイルをチェック
+            let neighbors = [];
+            let cx = i % width;
+            let cy = Math.floor(i / width);
+            
+            [[0,1],[0,-1],[1,0],[-1,0]].forEach(([dx, dy]) => {
+                let nx=cx+dx, ny=cy+dy;
+                if(nx>=0 && nx<width && ny>=0 && ny<height) {
+                    let nIdx = ny*width+nx;
+                    if(ownerGrid[nIdx] !== -1) neighbors.push(ownerGrid[nIdx]);
+                }
+            });
+
+            if(neighbors.length > 0) {
+                // 最も多い隣国に吸収される確率が高い
+                let chosen = neighbors[Math.floor(Math.random()*neighbors.length)];
+                newOwners[i] = chosen;
+                nations[chosen].tiles.push(i);
+                changed = true;
+            }
+        }
+        ownerGrid = newOwners;
+        loopCount++;
+    }
+}
+
+
+/**
+ * メインループとシミュレーション
+ */
+function loop() {
+    ctx.fillStyle = "#222";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    renderMap();
+    
+    if (!isDrawing && !isPaused) {
+        if (Math.random() < 0.2) { // 更新頻度調整
+            simulateTick();
+            year++;
+            document.getElementById('info-year').innerText = year;
+        }
+    }
+
+    if (selectedNationId !== -1) updateNationPanel();
+
+    animationFrame = requestAnimationFrame(loop);
+}
+
+function renderMap() {
+    const offsetX = canvas.width/2 - (width*TILE_SIZE)/2;
+    const offsetY = canvas.height/2 - (height*TILE_SIZE)/2;
+
+    for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+            const i = y * width + x;
+            const type = grid[i];
+            const owner = ownerGrid[i];
+            
+            let color = COLORS.WATER;
+            if (type === 1) color = COLORS.LAND;
+            if (type === 2) color = COLORS.MOUNTAIN;
+            if (type === 3) color = COLORS.RIVER;
+
+            // 国の色オーバーレイ
+            if (owner !== -1 && !isDrawing) {
+                const nat = nations.find(n => n.id === owner);
+                if (nat) {
+                    // 国の色をベースにするが、地形も見せる
+                    ctx.fillStyle = nat.color;
+                    ctx.fillRect(offsetX + x*TILE_SIZE, offsetY + y*TILE_SIZE, TILE_SIZE, TILE_SIZE);
+                    
+                    // 山や川の場合は装飾
+                    if (type === 2) { // 山
+                        ctx.fillStyle = "rgba(0,0,0,0.5)";
+                        ctx.fillRect(offsetX + x*TILE_SIZE+1, offsetY + y*TILE_SIZE+1, TILE_SIZE-2, TILE_SIZE-2);
+                    }
+                    else if (type === 3) { // 川
+                        ctx.fillStyle = "rgba(100,200,255,0.6)";
+                        ctx.fillRect(offsetX + x*TILE_SIZE + TILE_SIZE/3, offsetY + y*TILE_SIZE, TILE_SIZE/3, TILE_SIZE);
+                    }
+                }
+            } else {
+                // 描画モード or 領土なし
+                ctx.fillStyle = color;
+                ctx.fillRect(offsetX + x*TILE_SIZE, offsetY + y*TILE_SIZE, TILE_SIZE, TILE_SIZE);
+            }
+        }
+    }
+    
+    // 枠線
+    ctx.strokeStyle = "#444";
+    ctx.strokeRect(offsetX, offsetY, width*TILE_SIZE, height*TILE_SIZE);
+}
+
+function simulateTick() {
+    let totalPop = 0;
+
+    // 1. 内政フェーズ
+    nations.forEach(n => {
+        if (n.isDead) return;
+
+        // 人口増加: GDPと食料(領土数)に依存
+        let growth = (n.gdp / n.pop) * 0.1 + 0.001;
+        if(n.pop > n.tiles.length * 1000) growth -= 0.05; // 過密ペナルティ
+        n.pop = Math.floor(n.pop * (1 + growth));
+        
+        // GDP成長: 工業力と人口、技術
+        n.gdp += (n.industry * 0.5) + (n.pop * 0.01) * (1+n.tech*0.5);
+        
+        // 軍備増強: GDPの一部を軍事費へ
+        let milBudget = n.gdp * 0.1;
+        if (n.atWarWith.length > 0) milBudget = n.gdp * 0.3; // 戦時体制
+
+        // 兵士雇用 / 維持
+        let desiredSoldiers = Math.floor(n.pop * 0.05); // 人口の5%が上限目安
+        if (n.soldiers < desiredSoldiers && milBudget > 0) {
+            n.soldiers += 10;
+            milBudget -= 10;
+        }
+        
+        // 技術発展 / 戦車製造
+        if (n.gdp > 5000 && n.tech < 4 && Math.random() < 0.01) n.tech++;
+        if (n.tech >= 2 && milBudget > 100) {
+            n.tanks++;
+            milBudget -= 50;
+        }
+
+        totalPop += n.pop;
+    });
+    document.getElementById('info-pop').innerText = formatNum(totalPop);
+
+    // 2. 外交フェーズ
+    nations.forEach(n => {
+        if (n.isDead) return;
+        
+        // ランダムな対象国を選ぶ
+        if(Math.random() > 0.1) return;
+        
+        const target = nations[Math.floor(Math.random() * nations.length)];
+        if (target.id === n.id || target.isDead) return;
+
+        // 関係値初期化
+        if (n.relations[target.id] === undefined) n.relations[target.id] = 0;
+
+        // 関係変動要因
+        let change = 0;
+        if (n.religion === target.religion) change += 2;
+        else change -= 1;
+        
+        // 隣接していると摩擦が起きやすい
+        if (isNeighbor(n, target)) change -= 2;
+
+        n.relations[target.id] = clamp(n.relations[target.id] + change, -100, 100);
+
+        // 戦争判定 (関係最悪 & 隣接)
+        if (n.relations[target.id] < -80 && isNeighbor(n, target)) {
+            if (!n.atWarWith.includes(target.id)) {
+                declareWar(n, target);
+            }
+        }
+        // 和平判定
+        else if (n.relations[target.id] > -20 && n.atWarWith.includes(target.id)) {
+            makePeace(n, target);
+        }
+    });
+
+    // 3. 戦争フェーズ
+    nations.forEach(attacker => {
+        if (attacker.isDead) return;
+        
+        attacker.atWarWith.forEach(enemyId => {
+            const defender = nations.find(n => n.id === enemyId);
+            if (!defender || defender.isDead) return;
+
+            // 戦闘処理
+            if (isNeighbor(attacker, defender)) {
+                battle(attacker, defender);
+            }
+        });
+    });
+    
+    // 滅亡判定
+    nations.forEach(n => {
+        if (!n.isDead && n.tiles.length === 0) {
+            n.isDead = true;
+            log(`${n.name} has fallen!`, "log-war");
+            // 戦争状態解除
+            nations.forEach(other => {
+                other.atWarWith = other.atWarWith.filter(id => id !== n.id);
+            });
+        }
+    });
+}
+
+function isNeighbor(n1, n2) {
+    // 重いので簡易判定: 領土の中心距離などではなく、実際のグリッド走査は重すぎる。
+    // ここでは「戦争中なら強制的に接触ありとみなす」または簡易的なランダムチェック
+    // 正確にするなら境界線リストを持つべきだが、今回はランダムピックで代用
+    for(let i=0; i<10; i++) {
+        let tile = n1.tiles[Math.floor(Math.random() * n1.tiles.length)];
+        let cx = tile % width;
+        let cy = Math.floor(tile / width);
+        let found = false;
+        [[0,1],[0,-1],[1,0],[-1,0]].forEach(([dx, dy]) => {
+            let nx=cx+dx, ny=cy+dy;
+            if(nx>=0 && nx<width && ny>=0 && ny<height) {
+                let nIdx = ny*width+nx;
+                if(ownerGrid[nIdx] === n2.id) found = true;
+            }
+        });
+        if(found) return true;
+    }
+    return false;
+}
+
+function declareWar(n1, n2) {
+    if(n1.atWarWith.includes(n2.id)) return;
+    n1.atWarWith.push(n2.id);
+    if(!n2.atWarWith.includes(n1.id)) n2.atWarWith.push(n1.id);
+    log(`WAR: ${n1.name} declared war on ${n2.name}!`, "log-war");
+}
+
+function makePeace(n1, n2) {
+    n1.atWarWith = n1.atWarWith.filter(id => id !== n2.id);
+    n2.atWarWith = n2.atWarWith.filter(id => id !== n1.id);
+    log(`PEACE: ${n1.name} and ${n2.name} signed a truce.`, "log-peace");
+}
+
+function battle(attacker, defender) {
+    // 攻撃側のパワー vs 防御側のパワー + 地形ボーナス
+    const atkPow = attacker.getMilitaryPower() * (0.8 + Math.random()*0.4);
+    const defPow = defender.getMilitaryPower() * (0.8 + Math.random()*0.4); // 防御有利なしの消耗戦
+
+    // どちらかが領土を奪う
+    // 攻撃側が圧倒的に強い場合
+    if (atkPow > defPow * 1.2) {
+        stealTerritory(attacker, defender);
+        // 敗者は兵を失う
+        defender.soldiers = Math.max(0, Math.floor(defender.soldiers * 0.95));
+    } else {
+        // 攻撃失敗、兵を失う
+        attacker.soldiers = Math.max(0, Math.floor(attacker.soldiers * 0.98));
+    }
+}
+
+function stealTerritory(winner, loser) {
+    // 敗者の領土のうち、勝者と接しているタイルを1つ奪う
+    // 計算量削減のため、ランダムサンプリングで境界を探す
+    for(let i=0; i<20; i++) {
+        let tile = winner.tiles[Math.floor(Math.random() * winner.tiles.length)];
+        let cx = tile % width;
+        let cy = Math.floor(tile / width);
+        
+        let targetIdx = -1;
+        // 隣接する敗者タイルを探す
+        [[0,1],[0,-1],[1,0],[-1,0]].forEach(([dx, dy]) => {
+            let nx=cx+dx, ny=cy+dy;
+            if(nx>=0 && nx<width && ny>=0 && ny<height) {
+                let idx = ny*width+nx;
+                if(ownerGrid[idx] === loser.id) targetIdx = idx;
+            }
+        });
+
+        if (targetIdx !== -1) {
+            // 領土移動処理
+            ownerGrid[targetIdx] = winner.id;
+            winner.tiles.push(targetIdx);
+            loser.tiles = loser.tiles.filter(t => t !== targetIdx);
+            return; // 1ターン1タイルのみ
+        }
+    }
+}
+
+/**
+ * UI & Utility
+ */
+function updateNationPanel() {
+    if (selectedNationId === -1) return;
+    const n = nations.find(nat => nat.id === selectedNationId);
+    if (!n) return;
+
+    document.getElementById('n-name').innerText = n.name + (n.isDead ? " (滅亡)" : "");
+    document.getElementById('n-name').style.color = n.color;
+    document.getElementById('n-religion').innerText = n.religion;
+    document.getElementById('n-tech').innerText = TECH_LEVELS[n.tech];
+    
+    document.getElementById('n-gdp').innerText = formatNum(n.gdp);
+    document.getElementById('bar-gdp').style.width = Math.min(100, n.gdp / 1000) + "%";
+    
+    document.getElementById('n-pop').innerText = formatNum(n.pop);
+    document.getElementById('bar-pop').style.width = Math.min(100, n.pop / 50000) + "%";
+    
+    document.getElementById('n-mil').innerText = formatNum(n.soldiers);
+    document.getElementById('bar-mil').style.width = Math.min(100, n.soldiers / 5000) + "%";
+    
+    document.getElementById('n-ind').innerText = n.industry;
+    document.getElementById('n-tanks').innerText = n.tanks;
+    document.getElementById('n-qual').innerText = n.soldierQuality.toFixed(2);
+}
+
+function log(msg, className) {
+    const logEl = document.getElementById('log');
+    const line = document.createElement('div');
+    line.innerText = `[Y${year}] ${msg}`;
+    if (className) line.className = className;
+    logEl.prepend(line);
+    if (logEl.children.length > 50) logEl.lastChild.remove();
+}
+
+function formatNum(num) {
+    if (num >= 1000000) return (num/1000000).toFixed(1) + "M";
+    if (num >= 1000) return (num/1000).toFixed(1) + "k";
+    return Math.floor(num);
+}
+
+function clamp(val, min, max) {
+    return Math.min(Math.max(val, min), max);
+}
+
+</script>
+</body>
+</html>
