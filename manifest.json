@@ -1,6 +1,6 @@
 {
-    "name": "PWA sample program",
-    "short_name": "PWA sample",
+    "name": "TERI",
+    "short_name": "TERI",
     "start_url": "index.html",
     "display": "standalone",
     "icons": [
