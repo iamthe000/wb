@@ -1183,6 +1183,20 @@ function renderMap() {
 function handlePolitics(n) {
     if (n.isDead) return;
 
+    // 傀儡国の独立判定
+    if (n.isPuppet) {
+        const master = nations.find(m => m.id === n.masterId);
+        
+        // 1. 宗主国が消滅している場合 -> 即時独立
+        if (!master || master.isDead) {
+            declareIndependence(n);
+        }
+        // 2. 機会主義的独立 (宗主国が不安定かつ自国が安定)
+        else if (n.stability > 70 && master.stability < 30 && Math.random() < 0.005) {
+            declareIndependence(n);
+        }
+    }
+
     // 指導者の交代
     if (Math.random() < 0.005) {
         const oldLeader = n.leader;
@@ -1354,6 +1368,37 @@ function handlePolitics(n) {
             // 安定度回復
             n.stability = Math.min(100, n.stability + 30);
         }
+    }
+}
+
+function declareIndependence(n) {
+    if (!n.isPuppet) return;
+    
+    const oldName = n.name;
+    const oldMasterId = n.masterId;
+    
+    n.isPuppet = false;
+    n.masterId = -1;
+    n.updateName();
+    
+    const master = nations.find(m => m.id === oldMasterId);
+    if (master && !master.isDead) {
+        log(`独立宣言: ${oldName}は${master.name}からの独立を宣言し、${n.name}となりました。`, "log-peace");
+        master.addHistory(`独立: ${n.name}が独立`);
+        n.addHistory(`独立: ${master.name}より独立`);
+        
+        // 宗主国との関係悪化
+        if (master.relations[n.id] !== undefined) master.relations[n.id] -= 50;
+        else master.relations[n.id] = -50;
+        
+        if (n.relations[master.id] !== undefined) n.relations[master.id] -= 50;
+        else n.relations[master.id] = -50;
+        
+        // 安定度上昇 (独立の高揚感)
+        n.stability = Math.min(100, n.stability + 10);
+    } else {
+        log(`独立回復: 宗主国の消滅または不在に伴い、${oldName}は${n.name}として主権を回復しました。`, "log-peace");
+        n.addHistory(`主権回復: 宗主国消滅による`);
     }
 }
 
