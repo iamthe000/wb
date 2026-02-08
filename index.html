@@ -902,7 +902,7 @@ function renderMap() {
                 ctx.strokeText(n.name, drawX, drawY);
                 
                 // 文字本体
-                ctx.fillStyle = "rgba(255,255,255,0.95)";
+                ctx.fillStyle = n.color;
                 ctx.fillText(n.name, drawX, drawY);
             }
         });
@@ -1214,6 +1214,8 @@ function simulateTick() {
             if (!n.atWarWith.includes(target.id)) {
                 // 傀儡国は主人に逆らわない
                 if (n.isPuppet && n.masterId === target.id) return;
+                // 主人は傀儡国を攻撃しない
+                if (target.isPuppet && target.masterId === n.id) return;
                 declareWar(n, target);
             }
         }
@@ -1223,6 +1225,8 @@ function simulateTick() {
             if (!n.atWarWith.includes(target.id)) {
                 // 傀儡国は主人に逆らわない
                 if (n.isPuppet && n.masterId === target.id) return;
+                // 主人は傀儡国を攻撃しない
+                if (target.isPuppet && target.masterId === n.id) return;
                 log(`野心: ${n.name}は${target.name}への領土拡大の好機を見出しました！`, "log-war");
                 declareWar(n, target);
             }
@@ -1355,6 +1359,17 @@ function declareWar(n1, n2) {
     worldTension = Math.min(100, worldTension + 5);
     log(`戦争: ${n1.name}が${n2.name}に宣戦布告しました！（緊張度: ${worldTension.toFixed(1)}%）`, "log-war");
 
+    // 宗主国による防衛
+    if (n2.isPuppet && n2.masterId !== -1) {
+        const master = nations.find(m => m.id === n2.masterId);
+        if (master && !master.isDead && master.id !== n1.id) {
+            if (!master.atWarWith.includes(n1.id)) {
+                 log(`${n2.name}の宗主国である${master.name}が保護義務を履行し、参戦しました。`, "log-war");
+                 declareWar(master, n1);
+            }
+        }
+    }
+
     // 傀儡国も参戦
     nations.forEach(puppet => {
         if (puppet.isPuppet && puppet.masterId === n1.id && !puppet.isDead) {
@@ -1427,6 +1442,17 @@ function concludePeace(n1, n2, type) {
         loser.stability = 50;
         winner.relations[loser.id] = 100;
         loser.relations[winner.id] = 100;
+        
+        // 敗戦国の傀儡国を戦勝国へ委譲
+        nations.forEach(vassal => {
+            if (vassal.isPuppet && vassal.masterId === loser.id && !vassal.isDead) {
+                vassal.masterId = winner.id;
+                // 名前更新は不要かもしれないが、念のため
+                vassal.updateName();
+                log(`戦勝国による処分: ${vassal.name}の宗主権が${winner.name}に移譲されました。`, "log-war");
+            }
+        });
+
         log(`戦後処理: ${loser.name}は${winner.name}の傀儡国となりました。`, "log-war");
     } else {
         log(`和平: ${n1.name}と${n2.name}が停戦合意しました。`, "log-peace");
