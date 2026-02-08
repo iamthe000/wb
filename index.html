@@ -90,7 +90,11 @@ if ('serviceWorker' in navigator) {
         <div id="nation-panel" class="panel" style="display:none;">
             <h2 id="n-name">国家名</h2>
             <div class="stat-row"><span>指導者:</span> <span id="n-leader"></span></div>
-            <div class="stat-row"><span>体制:</span> <span id="n-gov"></span></div>
+            <div class="stat-row"><span>経済思想:</span> <span id="n-eco"></span></div>
+            <div class="stat-row"><span>政治体制(大枠):</span> <span id="n-sys-broad"></span></div>
+            <div class="stat-row"><span>政治体制(詳細):</span> <span id="n-gov"></span></div>
+            <div class="stat-row"><span>国家体制:</span> <span id="n-struct"></span></div>
+            <div class="stat-row"><span>主権者:</span> <span id="n-sov"></span></div>
             <div class="stat-row"><span>宗教:</span> <span id="n-religion"></span></div>
             <div class="stat-row"><span>技術:</span> <span id="n-tech"></span></div>
             <div class="stat-row"><span>安定度:</span> <span id="n-stability"></span></div>
@@ -134,6 +138,79 @@ const COLORS = {
 };
 const RELIGIONS = ['太陽神教', '海霊信仰', '機械崇拝', '自然の秩序', '混沌', '虚無'];
 const TECH_LEVELS = ['原始的', '農耕社会', '工業化', '現代的', '未来的'];
+
+const POLITICAL_SYSTEMS = {
+    ECONOMIC: ['自由放任主義', '社会的市場経済', '混合経済', '計画経済', '統制経済', '協同組合主義', '重商主義', '農本主義'],
+    BROAD: ['民主主義', '権威主義', '全体主義'],
+    DETAILED: {
+        '民主主義': ['議院内閣制', '大統領制', '半大統領制', '二元代表制'],
+        '権威主義': ['絶対君主制', '立憲君主制', '軍事評議会制', '選挙君主制', '個人独裁制'],
+        '全体主義': ['一党独裁制', '神権政治', '前衛党独裁', '軍事独裁制']
+    },
+    STRUCTURE: ['単一国家', '連邦国家', '国家連合'],
+    SOVEREIGN: {
+        '民主主義': ['国民'],
+        '権威主義': ['君主', '独裁者', '軍部', '貴族議会'],
+        '全体主義': ['党', '宗教指導者', '独裁者']
+    }
+};
+
+function generatePoliticalSystem(currentTech) {
+    // 1. Broad Framework (Weight by Tech)
+    let broad;
+    if (currentTech < 2) { // Primitive/Agrarian -> mostly Authoritarian
+        broad = Math.random() < 0.8 ? '権威主義' : (Math.random() < 0.5 ? '全体主義' : '民主主義');
+    } else {
+        broad = POLITICAL_SYSTEMS.BROAD[Math.floor(Math.random() * POLITICAL_SYSTEMS.BROAD.length)];
+    }
+    
+    // 2. Detailed System
+    const details = POLITICAL_SYSTEMS.DETAILED[broad];
+    const detailed = details[Math.floor(Math.random() * details.length)];
+    
+    // 3. Sovereign
+    let sovereigns = POLITICAL_SYSTEMS.SOVEREIGN[broad];
+    // Specific logic overrides
+    if (detailed.includes('君主')) {
+        sovereigns = ['君主'];
+    } else if (detailed.includes('軍事')) {
+        sovereigns = ['軍部', '独裁者'];
+    } else if (detailed.includes('神権')) {
+        sovereigns = ['宗教指導者', '神'];
+    }
+    const sovereign = sovereigns[Math.floor(Math.random() * sovereigns.length)];
+
+    // 4. State Structure
+    const structure = POLITICAL_SYSTEMS.STRUCTURE[Math.floor(Math.random() * POLITICAL_SYSTEMS.STRUCTURE.length)];
+
+    // 5. Economic Ideology
+    let possibleEcos = [...POLITICAL_SYSTEMS.ECONOMIC];
+    // Filter based on era/tech
+    if (currentTech < 2) {
+        possibleEcos = ['重商主義', '農本主義', '統制経済'];
+    } else {
+        // Filter based on politics
+        if (broad === '全体主義' || detailed.includes('計画') || detailed.includes('社会主義')) {
+             possibleEcos = ['計画経済', '統制経済'];
+        } else if (broad === '民主主義') {
+             possibleEcos = ['自由放任主義', '社会的市場経済', '混合経済', '協同組合主義'];
+        } else if (detailed.includes('絶対君主')) {
+             possibleEcos = ['重商主義', '統制経済', '混合経済', '農本主義'];
+        }
+    }
+    // Fallback if empty (shouldn't happen but safety)
+    if (possibleEcos.length === 0) possibleEcos = POLITICAL_SYSTEMS.ECONOMIC;
+    
+    const eco = possibleEcos[Math.floor(Math.random() * possibleEcos.length)];
+
+    return {
+        sysBroad: broad,
+        sysDetailed: detailed,
+        sovereign: sovereign,
+        stateStruct: structure,
+        ecoIdeology: eco
+    };
+}
 
 // グローバル変数
 let canvas, ctx, width, height;
@@ -582,8 +659,15 @@ class Nation {
         this.tech = 0; // Index of TECH_LEVELS
         
         // Politics
-        const startGovs = ["絶対王政", "多党民主制", "二大政党民主制", "帝国", "公国", "連邦制"];
-        this.govType = startGovs[Math.floor(Math.random() * startGovs.length)];
+        const system = generatePoliticalSystem(this.tech);
+        this.sysBroad = system.sysBroad;
+        this.sysDetailed = system.sysDetailed;
+        this.sovereign = system.sovereign;
+        this.stateStruct = system.stateStruct;
+        this.ecoIdeology = system.ecoIdeology;
+        
+        this.govType = this.sysDetailed; // Backward compatibility
+
         this.updateName();
         this.stability = 100;
         this.unrest = 0;
@@ -661,23 +745,33 @@ class Nation {
                 proposedName = this.baseName + "傀儡統治機構国";
             }
         } else {
-            const suffixes = {
-                "絶対王政": "王国",
-                "多党民主制": "共和国",
-                "二大政党民主制": "合衆国",
-                "共和制": "共和国", // Legacy
-                "帝国": "帝国",
-                "公国": "公国",
-                "連邦制": "連邦",
-                "独裁制": "国",
-                "軍事政権": "国",
-                "革命政府": "革命政府",
-                "臨時政府": "臨時政府",
-                "正統政府": "正統政府"
-            };
-            let suffix = suffixes[this.govType] || "国";
+            let suffix = "国";
+
+            // Suffix logic based on detailed political system
+            if (this.sysDetailed.includes('君主') || this.sovereign === '君主') {
+                if (this.sysDetailed === '帝国' || (this.id % 5 === 0)) suffix = "帝国";
+                else suffix = "王国";
+                if (this.sysDetailed === '公国') suffix = "公国";
+            } else if (this.sysDetailed.includes('軍事') || this.sovereign === '軍部') {
+                suffix = "軍事政権";
+            } else if (this.sysDetailed.includes('神権') || this.sovereign === '宗教指導者') {
+                suffix = "神聖国";
+            } else if (this.sysBroad === '民主主義') {
+                suffix = "共和国";
+                if (this.stateStruct === '連邦国家') suffix = "連邦" + suffix;
+                if (this.stateStruct === '国家連合') suffix = "連合";
+                if (this.sysDetailed === '大統領制' && this.stateStruct === '連邦国家') suffix = "合衆国"; // Flavor override
+            } else if (this.sysBroad === '全体主義') {
+                if (this.ecoIdeology.includes('計画') || this.ecoIdeology.includes('統制')) suffix = "社会主義共和国";
+                else suffix = "独裁国";
+            }
             
-            if ((this.govType === "多党民主制" || this.govType === "二大政党民主制" || this.govType === "共和制") && this.regimeNumber > 1) {
+            // Special cases
+            if (this.sysDetailed === "革命政府") suffix = "革命政府";
+            if (this.sysDetailed === "臨時政府") suffix = "臨時政府";
+            if (this.sysDetailed === "正統政府") suffix = "正統政府";
+
+            if (this.sysBroad === '民主主義' && this.regimeNumber > 1) {
                 proposedName = this.baseName + suffix + "第" + this.regimeNumber + "政";
             } else {
                 proposedName = this.baseName + suffix;
@@ -689,7 +783,7 @@ class Nation {
             this.name = proposedName;
         } else {
             // Check if we should use "Nth Regime" numbering
-            const isDemocracy = ["多党民主制", "二大政党民主制", "共和制"].includes(this.govType);
+            const isDemocracy = this.sysBroad === '民主主義';
             
             if (isDemocracy) {
                 let baseString = proposedName;
@@ -1089,8 +1183,8 @@ function handlePolitics(n) {
         const oldLeader = n.leader;
         n.leader = n.generateLeaderName();
         let stabChange = Math.floor(Math.random() * 30) - 20; // -20 to +10
-        // 二大政党民主制は指導者交代時の安定度低下が大きい
-        if (n.govType === "二大政党民主制") {
+        // 大統領制は指導者交代時の安定度低下が大きい
+        if (n.sysDetailed === "大統領制") {
             stabChange -= 15;
         }
         n.stability = clamp(n.stability + stabChange, 0, 100);
@@ -1099,7 +1193,7 @@ function handlePolitics(n) {
     }
 
     // 王政国家向けのランダムイベント (共和派の台頭など)
-    if ((n.govType === "絶対王政" || n.govType === "帝国") && Math.random() < 0.002) {
+    if ((n.sysDetailed.includes('君主') || n.sovereign === '君主') && Math.random() < 0.002) {
         const events = [
             { msg: "共和派の活動が活発化しています。", stab: -15 },
             { msg: "啓蒙思想が広まり、旧体制への不満が高まっています。", stab: -10 },
@@ -1165,18 +1259,30 @@ function handlePolitics(n) {
     // 政変の判定
     if (n.stability < 50 && Math.random() < 0.002) {
         const oldName = n.name;
-        const oldGov = n.govType;
-        n.govType = (Math.random() > 0.5) ? "独裁制" : "軍事政権";
+        const oldGov = n.sysDetailed;
+        
+        // 権威主義または軍事政権へ移行
+        n.sysBroad = '権威主義';
+        n.sysDetailed = (Math.random() > 0.5) ? "個人独裁制" : "軍事評議会制";
+        n.sovereign = (n.sysDetailed === '軍事評議会制') ? '軍部' : '独裁者';
+        n.govType = n.sysDetailed;
+
         n.updateName();
         n.stability = Math.max(0, n.stability - 30);
-        log(`${oldName}で政変が発生！ ${oldGov}から${n.govType}へ体制が変わり、${n.name}となりました。`, "log-war");
-        n.addHistory(`政変: ${oldGov} -> ${n.govType} (${oldName} -> ${n.name})`);
+        log(`${oldName}で政変が発生！ ${oldGov}から${n.sysDetailed}へ体制が変わり、${n.name}となりました。`, "log-war");
+        n.addHistory(`政変: ${oldGov} -> ${n.sysDetailed} (${oldName} -> ${n.name})`);
     }
 
     // 民主制への移行
-    if (!["多党民主制", "二大政党民主制", "共和制"].includes(n.govType) && n.tech >= 3 && n.stability > 80 && Math.random() < 0.001) {
+    if (n.sysBroad !== '民主主義' && n.tech >= 3 && n.stability > 80 && Math.random() < 0.001) {
         const oldName = n.name;
-        n.govType = (Math.random() < 0.5) ? "多党民主制" : "二大政党民主制";
+        
+        n.sysBroad = '民主主義';
+        n.sysDetailed = (Math.random() < 0.5) ? "議院内閣制" : "大統領制";
+        n.sovereign = '国民';
+        n.ecoIdeology = (Math.random() < 0.5) ? '自由放任主義' : '混合経済';
+        n.govType = n.sysDetailed;
+
         n.regimeNumber++;
         n.updateName();
         log(`${oldName}は近代化に伴い民主化し、${n.name}となりました。`, "log-peace");
@@ -1198,8 +1304,16 @@ function handlePolitics(n) {
     if (n.isRebel && n.stability > 70 && n.tiles.length > 25 && Math.random() < 0.01) {
         n.isRebel = false;
         const oldName = n.name;
-        const newGovs = ["多党民主制", "二大政党民主制", "帝国", "連邦制"];
-        n.govType = newGovs[Math.floor(Math.random() * newGovs.length)];
+        
+        // システムを再構築
+        const system = generatePoliticalSystem(n.tech);
+        n.sysBroad = system.sysBroad;
+        n.sysDetailed = system.sysDetailed;
+        n.sovereign = system.sovereign;
+        n.stateStruct = system.stateStruct;
+        n.ecoIdeology = system.ecoIdeology;
+        n.govType = n.sysDetailed;
+
         n.updateName();
         log(`${oldName}は安定した統治を確立し、${n.name}として国家の正統性を主張し始めました。`, "log-peace");
         n.addHistory(`正統化: ${oldName} -> ${n.name}`);
@@ -1265,7 +1379,14 @@ function grantIndependence(n, city) {
         newNation.name = proposedName;
     }
 
-    newNation.govType = "共和国";
+    const system = generatePoliticalSystem(n.tech);
+    newNation.sysBroad = '民主主義';
+    newNation.sysDetailed = '議院内閣制';
+    newNation.sovereign = '国民';
+    newNation.stateStruct = '単一国家';
+    newNation.ecoIdeology = n.ecoIdeology;
+    newNation.govType = newNation.sysDetailed;
+    
     newNation.color = `hsl(${Math.random()*360}, 60%, 60%)`;
     newNation.tech = n.tech;
     newNation.religion = n.religion;
@@ -1324,23 +1445,56 @@ function triggerCityRebellion(n, cities) {
     rebel.parentName = n.baseName;
     rebel.isRebel = true;
 
+    // 反乱軍の政治体制
+    rebel.ecoIdeology = n.ecoIdeology;
+    rebel.stateStruct = '単一国家';
+
+    if (n.sysBroad === '民主主義') {
+         // 民主制からの反乱 -> 軍事クーデターや革命
+         rebel.sysBroad = '権威主義';
+         rebel.sysDetailed = '軍事評議会制';
+         rebel.sovereign = '軍部';
+    } else {
+         // 権威主義からの反乱 -> 民主化革命
+         rebel.sysBroad = '民主主義';
+         rebel.sysDetailed = '革命政府';
+         rebel.sovereign = '国民';
+    }
+    rebel.govType = rebel.sysDetailed;
+
     // かっこいい反乱軍の名称生成
     const rebelTypes = [
         { name: "臨時政府", gov: "臨時政府" },
         { name: "立憲派", gov: "革命政府" },
         { name: "正統政府", gov: "正統政府" },
-        { name: "救国戦線", gov: "革命政府" },
+        { name: "救国戦線", gov: "軍事評議会制" },
         { name: "人民委員会", gov: "革命政府" }
     ];
     
     // 特別な名称: 共和国第n政 (親が民主制の場合)
-    if (["共和制", "多党民主制", "二大政党民主制"].includes(n.govType) && Math.random() < 0.4) {
-        rebel.govType = n.govType;
+    if (n.sysBroad === '民主主義' && Math.random() < 0.4) {
+        rebel.sysBroad = '民主主義';
+        rebel.sysDetailed = n.sysDetailed;
+        rebel.sovereign = '国民';
         rebel.regimeNumber = n.regimeNumber + 1;
+        rebel.govType = rebel.sysDetailed;
         rebel.updateName();
     } else {
         const type = rebelTypes[Math.floor(Math.random() * rebelTypes.length)];
-        rebel.govType = type.gov;
+        rebel.sysDetailed = type.gov;
+        // Adjust broad/sovereign for special types
+        if (type.gov === '革命政府' || type.gov === '臨時政府') {
+            rebel.sysBroad = '民主主義';
+            rebel.sovereign = '国民';
+        } else if (type.gov === '軍事評議会制') {
+            rebel.sysBroad = '権威主義';
+            rebel.sovereign = '軍部';
+        } else if (type.gov === '正統政府') {
+            rebel.sysBroad = n.sysBroad;
+            rebel.sovereign = n.sovereign;
+        }
+        rebel.govType = rebel.sysDetailed;
+
         // 都市名を冠した名称にする (最初の都市)
         const prefix = cities[0].name.substring(0, cities[0].name.length - 1);
         let proposedName = prefix + type.name;
@@ -2165,7 +2319,13 @@ function updateNationPanel() {
     document.getElementById('n-name').innerText = n.name + (n.isDead ? " (滅亡)" : "");
     document.getElementById('n-name').style.color = n.color;
     document.getElementById('n-leader').innerText = n.leader;
-    document.getElementById('n-gov').innerText = n.govType;
+    
+    document.getElementById('n-eco').innerText = n.ecoIdeology || '-';
+    document.getElementById('n-sys-broad').innerText = n.sysBroad || '-';
+    document.getElementById('n-gov').innerText = n.sysDetailed || n.govType;
+    document.getElementById('n-struct').innerText = n.stateStruct || '-';
+    document.getElementById('n-sov').innerText = n.sovereign || '-';
+
     document.getElementById('n-religion').innerText = n.religion;
     document.getElementById('n-tech').innerText = TECH_LEVELS[n.tech];
     document.getElementById('n-stability').innerText = Math.floor(n.stability) + "%";
