@@ -795,9 +795,16 @@ function renderMap() {
                 const nat = nations.find(n => n.id === owner);
                 if (nat) {
                     if (mapMode === 'political') {
+                        // 傀儡国は宗主国の色を使用
+                        let fillColor = nat.color;
+                        if (nat.isPuppet && nat.masterId !== -1) {
+                            const master = nations.find(m => m.id === nat.masterId);
+                            if (master) fillColor = master.color;
+                        }
+
                         // 国の色をベースにするが、地形も見せる (透過させる)
                         ctx.globalAlpha = 0.6;
-                        ctx.fillStyle = nat.color;
+                        ctx.fillStyle = fillColor;
                         ctx.fillRect(offsetX + x*TILE_SIZE, offsetY + y*TILE_SIZE, TILE_SIZE, TILE_SIZE);
                         ctx.globalAlpha = 1.0;
                     } else {
@@ -885,6 +892,9 @@ function renderMap() {
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         nations.forEach(n => {
+            // 傀儡国の名前は非表示
+            if (n.isPuppet) return;
+            
             if (!n.isDead && n.tiles.length > 30) {
                 // mapScaleが小さい（ズームアウトしている）ほど、フォントサイズを大きくして視認性を維持
                 const baseSize = 10 / mapScale;
@@ -1037,6 +1047,37 @@ function handlePolitics(n) {
         n.govType = newGovs[Math.floor(Math.random() * newGovs.length)];
         n.updateName();
         log(`${oldName}は安定した統治を確立し、${n.name}として国家の正統性を主張し始めました。`, "log-peace");
+    }
+
+    // 追い詰められた宗主国による緊急併合 (生存戦略)
+    if (!n.isPuppet && (n.tiles.length < 15 || n.cities.length === 0) && !n.isDead) {
+        const myPuppet = nations.find(p => p.isPuppet && p.masterId === n.id && !p.isDead);
+        if (myPuppet) {
+            // 全土併合
+            log(`緊急事態: 追い詰められた${n.name}は、国家存続のために傀儡国である${myPuppet.name}を緊急併合しました！`, "log-war");
+            
+            // タイルの移動
+            const puppetTiles = [...myPuppet.tiles];
+            puppetTiles.forEach(tileIdx => {
+                ownerGrid[tileIdx] = n.id;
+                n.tiles.push(tileIdx);
+            });
+            myPuppet.tiles = [];
+
+            // 都市の移動
+            myPuppet.cities.forEach(city => {
+                city.nationId = n.id;
+                n.cities.push(city);
+            });
+            myPuppet.cities = [];
+
+            // 傀儡国消滅
+            myPuppet.isDead = true;
+            myPuppet.pop = 0; // 人口も吸収すべきだが簡易的に0に
+            
+            // 安定度回復
+            n.stability = Math.min(100, n.stability + 30);
+        }
     }
 }
 
@@ -1436,6 +1477,31 @@ function concludePeace(n1, n2, type) {
             log(`和平: ${n1.name}と${n2.name}が停戦合意しました。`, "log-peace");
         }
     } else if (type === 'PUPPET') {
+        // 傀儡化時に領土の2/3を宗主国が吸収
+        const originalTiles = [...loser.tiles];
+        const numToAbsorb = Math.floor(originalTiles.length * 2 / 3);
+        
+        // 吸収するタイルを選ぶ（ランダムで簡易的に）
+        // 飛び地ができやすいが、簡易実装とする
+        for(let i=0; i<numToAbsorb; i++) {
+            const rndIdx = Math.floor(Math.random() * loser.tiles.length);
+            const tileIdx = loser.tiles[rndIdx];
+            
+            ownerGrid[tileIdx] = winner.id;
+            winner.tiles.push(tileIdx);
+            loser.tiles.splice(rndIdx, 1);
+        }
+
+        // 都市の委譲判定 (吸収されたタイルにある都市)
+        for(let i=loser.cities.length-1; i>=0; i--) {
+            const city = loser.cities[i];
+            if(ownerGrid[city.tileIdx] === winner.id) {
+                city.nationId = winner.id;
+                winner.cities.push(city);
+                loser.cities.splice(i, 1);
+            }
+        }
+
         loser.isPuppet = true;
         loser.masterId = winner.id;
         loser.updateName();
