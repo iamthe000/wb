@@ -556,6 +556,7 @@ class Nation {
         this.rebellionCooldown = 0;
         this.isPuppet = false;
         this.masterId = -1;
+        this.puppetSince = 0;
         
         this.cities = [];
 
@@ -1039,6 +1040,17 @@ function handlePolitics(n) {
         log(`${oldName}は近代化に伴い共和制へ移行し、${n.name}となりました。`, "log-peace");
     }
 
+    // 平和的独立 (低確率)
+    if (n.stability < 60 && n.cities.length > 2) {
+        // 首都以外で不満が高い都市が対象
+        const potentialCities = n.cities.filter((c, i) => i > 0 && c.unrest > 80);
+        potentialCities.forEach(city => {
+            if (Math.random() < 0.001) { // 非常に低確率
+                grantIndependence(n, city);
+            }
+        });
+    }
+
     // 反乱軍の正統化
     if (n.isRebel && n.stability > 70 && n.tiles.length > 25 && Math.random() < 0.01) {
         n.isRebel = false;
@@ -1078,6 +1090,63 @@ function handlePolitics(n) {
             // 安定度回復
             n.stability = Math.min(100, n.stability + 30);
         }
+    }
+}
+
+function grantIndependence(n, city) {
+    const newNation = new Nation();
+    newNation.baseName = n.baseName;
+    
+    // 都市名を冠した国名
+    const prefix = city.name.substring(0, city.name.length - 1); // "市"などを取る
+    newNation.name = prefix + "共和国";
+    newNation.govType = "共和国";
+    newNation.color = `hsl(${Math.random()*360}, 60%, 60%)`;
+    newNation.tech = n.tech;
+    newNation.religion = n.religion;
+
+    // 領土と都市の委譲
+    const radius = 6;
+    const cx = city.tileIdx % width;
+    const cy = Math.floor(city.tileIdx / width);
+    
+    for (let dy = -radius; dy <= radius; dy++) {
+        for (let dx = -radius; dx <= radius; dx++) {
+            const nx = cx + dx;
+            const ny = cy + dy;
+            if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
+                const idx = ny * width + nx;
+                if (ownerGrid[idx] === n.id) {
+                    ownerGrid[idx] = newNation.id;
+                    newNation.tiles.push(idx);
+                    n.tiles = n.tiles.filter(t => t !== idx);
+                }
+            }
+        }
+    }
+    
+    city.nationId = newNation.id;
+    newNation.cities.push(city);
+    n.cities = n.cities.filter(c => c !== city);
+
+    // 人口・兵力の分配
+    const ratio = 1 / (n.cities.length + 1); // 簡易計算
+    newNation.pop = Math.floor(n.pop * ratio);
+    n.pop = Math.max(0, n.pop - newNation.pop);
+    newNation.soldiers = Math.floor(n.soldiers * ratio * 0.5); // 兵力は少なめ
+    n.soldiers = Math.max(0, n.soldiers - newNation.soldiers);
+
+    if (newNation.tiles.length > 0) {
+        nations.push(newNation);
+        
+        // 良好な関係でスタート
+        n.relations[newNation.id] = 50;
+        newNation.relations[n.id] = 50;
+        
+        log(`平和的独立: ${n.name}から${city.name}が分離し、${newNation.name}として独立しました。`, "log-peace");
+        
+        // 安定度少し回復（厄介払いができたため）
+        n.stability = Math.min(100, n.stability + 5);
     }
 }
 
@@ -1222,6 +1291,36 @@ function simulateTick() {
     // 2. 外交フェーズ
     nations.forEach(n => {
         if (n.isDead) return;
+
+        // 外交併合: 傀儡国を併合
+        if (!n.isPuppet) {
+            const myPuppets = nations.filter(p => p.isPuppet && p.masterId === n.id && !p.isDead);
+            myPuppets.forEach(p => {
+                // 10年以上経過かつ宗主国の安定度が高い場合
+                if (year - p.puppetSince > 10 && n.stability > 70 && Math.random() < 0.005) {
+                    log(`外交併合: ${n.name}は長年の属国である${p.name}を完全に併合しました。`, "log-peace");
+                    
+                    // 領土統合
+                    const pTiles = [...p.tiles];
+                    pTiles.forEach(t => {
+                        ownerGrid[t] = n.id;
+                        n.tiles.push(t);
+                    });
+                    p.tiles = [];
+                    
+                    // 都市統合
+                    p.cities.forEach(c => {
+                        c.nationId = n.id;
+                        n.cities.push(c);
+                    });
+                    p.cities = [];
+
+                    p.isDead = true;
+                    p.pop = 0;
+                    n.stability = Math.min(100, n.stability + 10);
+                }
+            });
+        }
         
         // ランダムな対象国を選ぶ (頻度向上)
         const target = nations[Math.floor(Math.random() * nations.length)];
@@ -1636,6 +1735,7 @@ function concludePeace(n1, n2, type) {
 
         loser.isPuppet = true;
         loser.masterId = winner.id;
+        loser.puppetSince = year;
         loser.updateName();
         loser.stability = 50;
         winner.relations[loser.id] = 100;
