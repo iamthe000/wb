@@ -1301,6 +1301,13 @@ function simulateTick() {
                     } else {
                         concludePeace(n, target, 'PARTIAL_PEACE');
                     }
+                } else if (ratio > 2.5 || ratio < 0.4) {
+                    // 優勢 -> 国境割譲 または 都市割譲
+                    if (Math.random() < 0.6) {
+                        concludePeace(n, target, 'ANNEX_BORDER');
+                    } else {
+                        concludePeace(n, target, 'PARTIAL_PEACE');
+                    }
                 } else if (roughTerrainRatio > 0.6) {
                     // 地形による膠着
                     concludePeace(n, target, 'WHITE_PEACE');
@@ -1445,54 +1452,179 @@ function concludePeace(n1, n2, type) {
         log(`白紙講和: ${n1.name}と${n2.name}が現状維持で停戦しました。`, "log-peace");
     } else if (type === 'PARTIAL_PEACE') {
         // Transfer some cities as a condition
+        // 勝者の本国に近い都市を優先的に割譲させる
         const numCitiesToTransfer = Math.min(loser.cities.length - 1, 2);
+        
         if (numCitiesToTransfer > 0) {
-            for(let i=0; i<numCitiesToTransfer; i++) {
-                const city = loser.cities.pop();
-                if (city) {
-                    city.nationId = winner.id;
-                    winner.cities.push(city);
-                    // Also transfer surrounding tiles
-                    const cx = city.tileIdx % width;
-                    const cy = Math.floor(city.tileIdx / width);
-                    const radius = 5;
-                    for (let dy = -radius; dy <= radius; dy++) {
-                        for (let dx = -radius; dx <= radius; dx++) {
-                            const nx = cx + dx;
-                            const ny = cy + dy;
-                            if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
-                                const idx = ny * width + nx;
-                                if (ownerGrid[idx] === loser.id) {
-                                    ownerGrid[idx] = winner.id;
-                                    winner.tiles.push(idx);
-                                    loser.tiles = loser.tiles.filter(t => t !== idx);
-                                }
+            // 距離計算用ヘルパー
+            const getDist = (c1, c2) => {
+                const dx = (c1.tileIdx % width) - c2.x;
+                const dy = Math.floor(c1.tileIdx / width) - c2.y;
+                return dx*dx + dy*dy;
+            };
+
+            // 勝者の重心に近い順にソート
+            const sortedCities = [...loser.cities].sort((a, b) => {
+                return getDist(a, winner.centroid) - getDist(b, winner.centroid);
+            });
+
+            const citiesToTake = sortedCities.slice(0, numCitiesToTransfer);
+
+            citiesToTake.forEach(city => {
+                // loser.citiesから削除
+                loser.cities = loser.cities.filter(c => c !== city);
+                
+                city.nationId = winner.id;
+                winner.cities.push(city);
+                
+                // 周辺タイルの譲渡
+                const cx = city.tileIdx % width;
+                const cy = Math.floor(city.tileIdx / width);
+                const radius = 5;
+                for (let dy = -radius; dy <= radius; dy++) {
+                    for (let dx = -radius; dx <= radius; dx++) {
+                        const nx = cx + dx;
+                        const ny = cy + dy;
+                        if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
+                            const idx = ny * width + nx;
+                            if (ownerGrid[idx] === loser.id) {
+                                ownerGrid[idx] = winner.id;
+                                winner.tiles.push(idx);
+                                loser.tiles = loser.tiles.filter(t => t !== idx);
                             }
                         }
                     }
                 }
-            }
+            });
             log(`途中講和: ${loser.name}が領土を割譲し、${winner.name}と和平しました。`, "log-peace");
         } else {
             log(`和平: ${n1.name}と${n2.name}が停戦合意しました。`, "log-peace");
         }
-    } else if (type === 'PUPPET') {
-        // 傀儡化時に領土の2/3を宗主国が吸収
-        const originalTiles = [...loser.tiles];
-        const numToAbsorb = Math.floor(originalTiles.length * 2 / 3);
+    } else if (type === 'ANNEX_BORDER') {
+        // 国境地帯の割譲 (約20%)
+        const targetCount = Math.floor(loser.tiles.length * 0.2);
         
-        // 吸収するタイルを選ぶ（ランダムで簡易的に）
-        // 飛び地ができやすいが、簡易実装とする
-        for(let i=0; i<numToAbsorb; i++) {
-            const rndIdx = Math.floor(Math.random() * loser.tiles.length);
-            const tileIdx = loser.tiles[rndIdx];
-            
-            ownerGrid[tileIdx] = winner.id;
-            winner.tiles.push(tileIdx);
-            loser.tiles.splice(rndIdx, 1);
+        // 1. 直接接触しているタイルを特定
+        let borderTiles = [];
+        for(const tIdx of loser.tiles) {
+            const cx = tIdx % width;
+            const cy = Math.floor(tIdx / width);
+            let isBorder = false;
+            const neighbors = [[0,1],[0,-1],[1,0],[-1,0]];
+            for(const [dx, dy] of neighbors) {
+                let nx=cx+dx, ny=cy+dy;
+                if(nx>=0 && nx<width && ny>=0 && ny<height) {
+                    let nIdx = ny*width+nx;
+                    if(ownerGrid[nIdx] === winner.id) {
+                        isBorder = true;
+                        break;
+                    }
+                }
+            }
+            if(isBorder) borderTiles.push(tIdx);
         }
 
-        // 都市の委譲判定 (吸収されたタイルにある都市)
+        if (borderTiles.length > 0) {
+            const queue = [...borderTiles];
+            const takenSet = new Set(borderTiles);
+            
+            let head = 0;
+            while(head < queue.length && takenSet.size < targetCount) {
+                const curr = queue[head++];
+                const cx = curr % width;
+                const cy = Math.floor(curr / width);
+
+                const neighbors = [[0,1],[0,-1],[1,0],[-1,0]];
+                for(const [dx, dy] of neighbors) {
+                    let nx=cx+dx, ny=cy+dy;
+                    if(nx>=0 && nx<width && ny>=0 && ny<height) {
+                        let nIdx = ny*width+nx;
+                        if(ownerGrid[nIdx] === loser.id && !takenSet.has(nIdx)) {
+                            takenSet.add(nIdx);
+                            queue.push(nIdx);
+                        }
+                    }
+                }
+            }
+
+            // 領土移譲
+            takenSet.forEach(tIdx => {
+                ownerGrid[tIdx] = winner.id;
+                winner.tiles.push(tIdx);
+            });
+            loser.tiles = loser.tiles.filter(t => !takenSet.has(t));
+
+            // 都市移譲
+            for(let i=loser.cities.length-1; i>=0; i--) {
+                const city = loser.cities[i];
+                if(ownerGrid[city.tileIdx] === winner.id) {
+                    city.nationId = winner.id;
+                    winner.cities.push(city);
+                    loser.cities.splice(i, 1);
+                }
+            }
+            log(`国境割譲: ${loser.name}は国境地帯を${winner.name}に割譲しました。`, "log-peace");
+        } else {
+             log(`和平: ${n1.name}と${n2.name}が停戦合意しました。`, "log-peace");
+        }
+
+    } else if (type === 'PUPPET') {
+        // 傀儡化時に領土の2/3を宗主国が吸収するが、綺麗な国境にするために
+        // 敗戦国の首都を中心に約1/3の領土を残し、残りを割譲させる (BFS)
+        const totalTiles = loser.tiles.length;
+        const targetKeep = Math.ceil(totalTiles / 3);
+        
+        // 首都または最初のタイルを起点にする
+        let startTile = -1;
+        if (loser.cities.length > 0) {
+            startTile = loser.cities[0].tileIdx;
+        } else if (loser.tiles.length > 0) {
+            startTile = loser.tiles[0];
+        }
+
+        const keepSet = new Set();
+        if (startTile !== -1) {
+            const queue = [startTile];
+            keepSet.add(startTile);
+
+            let head = 0;
+            while(head < queue.length && keepSet.size < targetKeep) {
+                const curr = queue[head++];
+                const cx = curr % width;
+                const cy = Math.floor(curr / width);
+
+                const neighbors = [
+                    [cx+1, cy], [cx-1, cy], [cx, cy+1], [cx, cy-1]
+                ];
+
+                for(const [nx, ny] of neighbors) {
+                    if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
+                        const nIdx = ny * width + nx;
+                        // 自分の領土かつ未訪問なら追加
+                        if (ownerGrid[nIdx] === loser.id && !keepSet.has(nIdx)) {
+                            keepSet.add(nIdx);
+                            queue.push(nIdx);
+                            if (keepSet.size >= targetKeep) break;
+                        }
+                    }
+                }
+            }
+        }
+
+        // keepSetに含まれない領土をすべて勝者に移譲
+        const originalTiles = [...loser.tiles];
+        loser.tiles = []; // 一旦クリアして再構築
+
+        originalTiles.forEach(tIdx => {
+            if (keepSet.has(tIdx)) {
+                loser.tiles.push(tIdx);
+            } else {
+                ownerGrid[tIdx] = winner.id;
+                winner.tiles.push(tIdx);
+            }
+        });
+
+        // 都市の委譲判定
         for(let i=loser.cities.length-1; i>=0; i--) {
             const city = loser.cities[i];
             if(ownerGrid[city.tileIdx] === winner.id) {
