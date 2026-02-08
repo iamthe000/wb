@@ -1152,7 +1152,47 @@ function navalLanding(attacker, defender) {
 }
 
 function stealCoastalTerritory(winner, loser) {
-    // 敗者の領土のうち、海に接しているタイルを探す
+    // 1. 沿岸都市の奪取を優先
+    const coastalCities = loser.cities.filter(city => {
+        const cx = city.tileIdx % width;
+        const cy = Math.floor(city.tileIdx / width);
+        let isCoast = false;
+        [[0,1],[0,-1],[1,0],[-1,0]].forEach(([dx, dy]) => {
+            let nx=cx+dx, ny=cy+dy;
+            if(nx>=0 && nx<width && ny>=0 && ny<height && grid[ny*width+nx] === 0) isCoast = true;
+        });
+        return isCoast;
+    });
+
+    if (coastalCities.length > 0 && Math.random() < 0.5) {
+        const targetCity = coastalCities[Math.floor(Math.random() * coastalCities.length)];
+        const cx = targetCity.tileIdx % width;
+        const cy = Math.floor(targetCity.tileIdx / width);
+        const radius = 4;
+        
+        for (let dy = -radius; dy <= radius; dy++) {
+            for (let dx = -radius; dx <= radius; dx++) {
+                const nx = cx + dx;
+                const ny = cy + dy;
+                if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
+                    const idx = ny * width + nx;
+                    if (ownerGrid[idx] === loser.id) {
+                        ownerGrid[idx] = winner.id;
+                        winner.tiles.push(idx);
+                        loser.tiles = loser.tiles.filter(t => t !== idx);
+                    }
+                }
+            }
+        }
+        targetCity.nationId = winner.id;
+        winner.cities.push(targetCity);
+        loser.cities = loser.cities.filter(c => c !== targetCity);
+        loser.stability -= 15;
+        log(`海軍作戦: ${winner.name}が${loser.name}の沿岸都市「${targetCity.name}」を占拠しました！`, "log-war");
+        return;
+    }
+
+    // 2. 失敗した場合は通常の沿岸タイルを奪う
     for(let i=0; i<100; i++) {
         let tile = loser.tiles[Math.floor(Math.random() * loser.tiles.length)];
         let cx = tile % width;
@@ -1170,7 +1210,7 @@ function stealCoastalTerritory(winner, loser) {
             ownerGrid[tile] = winner.id;
             winner.tiles.push(tile);
             loser.tiles = loser.tiles.filter(t => t !== tile);
-            loser.stability -= 10;
+            loser.stability -= 5;
             log(`海軍作戦: ${winner.name}が${loser.name}への上陸作戦に成功しました！`, "log-war");
             return;
         }
