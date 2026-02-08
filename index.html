@@ -4,16 +4,17 @@
     <meta charset="UTF-8">
     <title>Fantasy World Simulator</title>
     <style>
-        body { margin: 0; overflow: hidden; background: #222; color: white; font-family: 'Segoe UI', sans-serif; }
+        body { margin: 0; overflow: hidden; background: #0c0c0c; color: #e0e0e0; font-family: 'Segoe UI', 'Roboto', sans-serif; }
         #container { display: flex; height: 100vh; }
-        #canvas-container { flex: 1; position: relative; cursor: crosshair; }
+        #canvas-container { flex: 1; position: relative; cursor: crosshair; background: #000; }
         canvas { display: block; image-rendering: pixelated; }
-        #sidebar { width: 320px; background: #333; padding: 20px; overflow-y: auto; box-shadow: -2px 0 5px rgba(0,0,0,0.5); display: flex; flex-direction: column; gap: 15px; }
+        #sidebar { width: 320px; background: #1a1a1a; padding: 20px; overflow-y: auto; box-shadow: -2px 0 10px rgba(0,0,0,0.8); display: flex; flex-direction: column; gap: 15px; border-left: 1px solid #333; }
         
-        h1, h2 { margin: 0 0 10px 0; color: #4db8ff; }
-        .panel { background: #444; padding: 10px; border-radius: 5px; }
-        button { background: #4db8ff; border: none; padding: 10px; color: #000; font-weight: bold; cursor: pointer; width: 100%; margin-top: 5px; border-radius: 3px; }
-        button:hover { background: #7cccff; }
+        h1, h2 { margin: 0 0 10px 0; color: #ccc; text-transform: uppercase; letter-spacing: 2px; font-weight: 300; }
+        h1 { font-size: 1.4em; border-bottom: 1px solid #555; padding-bottom: 8px; color: #4db8ff; }
+        .panel { background: #222; padding: 15px; border-radius: 0; border: 1px solid #444; margin-bottom: 10px; }
+        button { background: #34495e; border: 1px solid #5d6d7e; padding: 10px; color: #ecf0f1; font-weight: bold; cursor: pointer; width: 100%; margin-top: 5px; transition: 0.2s; }
+        button:hover { background: #4db8ff; color: #000; }
         button:disabled { background: #666; cursor: not-allowed; }
         
         .stat-row { display: flex; justify-content: space-between; font-size: 0.9em; margin-bottom: 3px; }
@@ -50,6 +51,7 @@
                     <option value="256">大 (256x256)</option>
                 </select>
             </div>
+            <button id="btn-fill" style="margin-bottom:10px;">塗りつぶしモード: OFF</button>
             <button id="btn-generate">世界を生成 (シミュレーション開始)</button>
         </div>
 
@@ -57,6 +59,7 @@
             <h2>2. World Info</h2>
             <div class="stat-row"><span>Year:</span> <span id="info-year">1</span></div>
             <div class="stat-row"><span>Total Pop:</span> <span id="info-pop">0</span></div>
+            <div class="stat-row"><span>Tension:</span> <span id="info-tension">0%</span></div>
             <button id="btn-pause">一時停止 / 再開</button>
         </div>
 
@@ -94,11 +97,11 @@
  */
 const TILE_SIZE = 6; // 描画時の1タイルのピクセルサイズ
 const COLORS = {
-    WATER: '#1a3c6e',
-    LAND: '#4caf50',
-    MOUNTAIN: '#5d4037',
-    RIVER: '#4fc3f7',
-    SNOW: '#fff'
+    WATER: '#1a2a3a',
+    LAND: '#3c4d3c',
+    MOUNTAIN: '#4a4a4a',
+    RIVER: '#2980b9',
+    SNOW: '#ecf0f1'
 };
 const RELIGIONS = ['Sun God', 'Sea Spirits', 'Machine Cult', 'Nature Order', 'Chaos', 'Void'];
 const TECH_LEVELS = ['Primitive', 'Agrarian', 'Industrial', 'Modern', 'Futuristic'];
@@ -109,7 +112,9 @@ let grid = []; // 0:Water, 1:Land, 2:Mountain, 3:River
 let ownerGrid = []; // ID of the nation owning this tile (-1 for none)
 let nations = [];
 let isDrawing = true;
+let isFillMode = false;
 let isPaused = false;
+let worldTension = 0;
 let year = 1;
 let animationFrame;
 let selectedNationId = -1;
@@ -188,6 +193,13 @@ function setupInput() {
     document.getElementById('btn-pause').addEventListener('click', () => {
         isPaused = !isPaused;
     });
+
+    document.getElementById('btn-fill').addEventListener('click', (e) => {
+        isFillMode = !isFillMode;
+        e.target.innerText = `塗りつぶしモード: ${isFillMode ? 'ON' : 'OFF'}`;
+        e.target.style.background = isFillMode ? '#4db8ff' : '#34495e';
+        e.target.style.color = isFillMode ? '#000' : '#ecf0f1';
+    });
 }
 
 /**
@@ -201,16 +213,46 @@ function handleDraw(e) {
     const y = Math.floor((e.clientY - rect.top - canvas.height/2 + (height*TILE_SIZE)/2) / TILE_SIZE);
 
     if (x >= 0 && x < width && y >= 0 && y < height) {
-        // ブラシサイズ（少し太く）
-        for(let dy=-1; dy<=1; dy++){
-            for(let dx=-1; dx<=1; dx++){
-                const nx = x+dx;
-                const ny = y+dy;
-                if(nx>=0 && nx<width && ny>=0 && ny<height){
-                    const idx = ny * width + nx;
-                    grid[idx] = (mouseButton === 0) ? 1 : 0; // 左:陸, 右:海
+        const targetType = (mouseButton === 0) ? 1 : 0;
+        
+        if (isFillMode) {
+            // 塗りつぶし（クリックした瞬間のみ実行したいが、mousedownでも呼ばれるのでOK）
+            // mousemove中に塗りつぶしを連打すると重いので、mousedownの時だけにする工夫が必要
+            if (e.type === 'mousedown') {
+                floodFill(x, y, targetType);
+            }
+        } else {
+            // ブラシサイズ（少し太く）
+            for(let dy=-1; dy<=1; dy++){
+                for(let dx=-1; dx<=1; dx++){
+                    const nx = x+dx;
+                    const ny = y+dy;
+                    if(nx>=0 && nx<width && ny>=0 && ny<height){
+                        const idx = ny * width + nx;
+                        grid[idx] = targetType;
+                    }
                 }
             }
+        }
+    }
+}
+
+function floodFill(startX, startY, newType) {
+    const oldType = grid[startY * width + startX];
+    if (oldType === newType) return;
+
+    const stack = [[startX, startY]];
+    while (stack.length > 0) {
+        const [x, y] = stack.pop();
+        const idx = y * width + x;
+
+        if (grid[idx] === oldType) {
+            grid[idx] = newType;
+
+            if (x > 0) stack.push([x - 1, y]);
+            if (x < width - 1) stack.push([x + 1, y]);
+            if (y > 0) stack.push([x, y - 1]);
+            if (y < height - 1) stack.push([x, y + 1]);
         }
     }
 }
@@ -484,6 +526,8 @@ function loop() {
             simulateTick();
             year++;
             document.getElementById('info-year').innerText = year;
+            document.getElementById('info-tension').innerText = worldTension.toFixed(1) + "%";
+            document.getElementById('info-tension').style.color = `rgb(${worldTension*2.55}, ${255 - worldTension*2.55}, 0)`;
         }
     }
 
@@ -511,9 +555,11 @@ function renderMap() {
             if (owner !== -1 && !isDrawing) {
                 const nat = nations.find(n => n.id === owner);
                 if (nat) {
-                    // 国の色をベースにするが、地形も見せる
+                    // 国の色をベースにするが、地形も見せる (透過させる)
+                    ctx.globalAlpha = 0.6;
                     ctx.fillStyle = nat.color;
                     ctx.fillRect(offsetX + x*TILE_SIZE, offsetY + y*TILE_SIZE, TILE_SIZE, TILE_SIZE);
+                    ctx.globalAlpha = 1.0;
                     
                     // 山や川の場合は装飾
                     if (type === 2) { // 山
@@ -533,25 +579,59 @@ function renderMap() {
         }
     }
     
-    // 枠線
-    ctx.strokeStyle = "#444";
+    // 国境線の描画 (HOI4スタイル)
+    if (!isDrawing) {
+        ctx.lineWidth = 2;
+        for (let y = 0; y < height; y++) {
+            for (let x = 0; x < width; x++) {
+                const i = y * width + x;
+                const owner = ownerGrid[i];
+                if (owner === -1) continue;
+
+                const rightOwner = (x < width - 1) ? ownerGrid[i + 1] : -2;
+                const bottomOwner = (y < height - 1) ? ownerGrid[i + width] : -2;
+
+                if (owner !== rightOwner) {
+                    ctx.strokeStyle = "rgba(0,0,0,0.5)";
+                    ctx.beginPath();
+                    ctx.moveTo(offsetX + (x + 1) * TILE_SIZE, offsetY + y * TILE_SIZE);
+                    ctx.lineTo(offsetX + (x + 1) * TILE_SIZE, offsetY + (y + 1) * TILE_SIZE);
+                    ctx.stroke();
+                }
+                if (owner !== bottomOwner) {
+                    ctx.strokeStyle = "rgba(0,0,0,0.5)";
+                    ctx.beginPath();
+                    ctx.moveTo(offsetX + x * TILE_SIZE, offsetY + (y + 1) * TILE_SIZE);
+                    ctx.lineTo(offsetX + (x + 1) * TILE_SIZE, offsetY + (y + 1) * TILE_SIZE);
+                    ctx.stroke();
+                }
+            }
+        }
+    }
+
+    // 外枠
+    ctx.strokeStyle = "#555";
+    ctx.lineWidth = 1;
     ctx.strokeRect(offsetX, offsetY, width*TILE_SIZE, height*TILE_SIZE);
 }
 
 function simulateTick() {
     let totalPop = 0;
+    // 緊張感の自然減衰
+    worldTension = Math.max(0, worldTension - 0.2);
 
     // 1. 内政フェーズ
     nations.forEach(n => {
         if (n.isDead) return;
 
-        // 人口増加: GDPと食料(領土数)に依存
-        let growth = (n.gdp / n.pop) * 0.1 + 0.001;
-        if(n.pop > n.tiles.length * 1000) growth -= 0.05; // 過密ペナルティ
+        // 人口増加: 領土面積と技術に基づくロジスティック回帰モデル
+        let capacity = n.tiles.length * 1000 * (1 + n.tech * 0.5);
+        let growth = 0.02 * (1 - n.pop / capacity);
+        if (growth < -0.01) growth = -0.01; // 急激な減少を抑える
         n.pop = Math.floor(n.pop * (1 + growth));
         
-        // GDP成長: 工業力と人口、技術
-        n.gdp += (n.industry * 0.5) + (n.pop * 0.01) * (1+n.tech*0.5);
+        // GDP成長: 工業力と人口、技術（人口依存度を下げる）
+        n.gdp += (n.industry * 2) + (n.pop * 0.002) * (1 + n.tech);
         
         // 軍備増強: GDPの一部を軍事費へ
         let milBudget = n.gdp * 0.1;
@@ -579,28 +659,44 @@ function simulateTick() {
     nations.forEach(n => {
         if (n.isDead) return;
         
-        // ランダムな対象国を選ぶ
-        if(Math.random() > 0.1) return;
-        
+        // ランダムな対象国を選ぶ (頻度向上)
         const target = nations[Math.floor(Math.random() * nations.length)];
         if (target.id === n.id || target.isDead) return;
 
         // 関係値初期化
         if (n.relations[target.id] === undefined) n.relations[target.id] = 0;
 
-        // 関係変動要因
-        let change = 0;
-        if (n.religion === target.religion) change += 2;
-        else change -= 1;
+        // 関係変動要因 (より過激に)
+        let change = (Math.random() - 0.5) * 5; 
+        if (n.religion === target.religion) change += 5;
+        else change -= 5;
+
+        // 世界の緊張感による悪化
+        change -= (worldTension / 10);
         
-        // 隣接していると摩擦が起きやすい
-        if (isNeighbor(n, target)) change -= 2;
+        // 隣接していると摩擦が非常に起きやすい
+        let neighbor = isNeighbor(n, target);
+        if (neighbor) change -= 10;
+
+        // ボーダーインシデント (突発的な悪化)
+        if (neighbor && Math.random() < 0.05) {
+            change -= 40;
+            log(`INCIDENT: Tension between ${n.name} and ${target.name}!`, "log-war");
+        }
 
         n.relations[target.id] = clamp(n.relations[target.id] + change, -100, 100);
 
-        // 戦争判定 (関係最悪 & 隣接)
-        if (n.relations[target.id] < -80 && isNeighbor(n, target)) {
+        // 戦争判定 (閾値を下げ、好戦的に)
+        if (n.relations[target.id] < -50 && neighbor) {
             if (!n.atWarWith.includes(target.id)) {
+                declareWar(n, target);
+            }
+        }
+
+        // 野心による開戦 (圧倒的有利な場合)
+        if (neighbor && n.getMilitaryPower() > target.getMilitaryPower() * 2 && Math.random() < 0.05) {
+            if (!n.atWarWith.includes(target.id)) {
+                log(`AMBITION: ${n.name} sees an opportunity to expand into ${target.name}!`, "log-war");
                 declareWar(n, target);
             }
         }
@@ -642,7 +738,7 @@ function isNeighbor(n1, n2) {
     // 重いので簡易判定: 領土の中心距離などではなく、実際のグリッド走査は重すぎる。
     // ここでは「戦争中なら強制的に接触ありとみなす」または簡易的なランダムチェック
     // 正確にするなら境界線リストを持つべきだが、今回はランダムピックで代用
-    for(let i=0; i<10; i++) {
+    for(let i=0; i<50; i++) {
         let tile = n1.tiles[Math.floor(Math.random() * n1.tiles.length)];
         let cx = tile % width;
         let cy = Math.floor(tile / width);
@@ -663,7 +759,8 @@ function declareWar(n1, n2) {
     if(n1.atWarWith.includes(n2.id)) return;
     n1.atWarWith.push(n2.id);
     if(!n2.atWarWith.includes(n1.id)) n2.atWarWith.push(n1.id);
-    log(`WAR: ${n1.name} declared war on ${n2.name}!`, "log-war");
+    worldTension = Math.min(100, worldTension + 5);
+    log(`WAR: ${n1.name} declared war on ${n2.name}! (Tension: ${worldTension.toFixed(1)}%)`, "log-war");
 }
 
 function makePeace(n1, n2) {
@@ -679,7 +776,13 @@ function battle(attacker, defender) {
 
     // どちらかが領土を奪う
     // 攻撃側が圧倒的に強い場合
-    if (atkPow > defPow * 1.2) {
+    if (atkPow > defPow * 1.5) {
+        // 圧倒的勝利: 3タイル奪う
+        stealTerritory(attacker, defender);
+        stealTerritory(attacker, defender);
+        stealTerritory(attacker, defender);
+        defender.soldiers = Math.max(0, Math.floor(defender.soldiers * 0.9));
+    } else if (atkPow > defPow * 1.1) {
         stealTerritory(attacker, defender);
         // 敗者は兵を失う
         defender.soldiers = Math.max(0, Math.floor(defender.soldiers * 0.95));
@@ -712,6 +815,17 @@ function stealTerritory(winner, loser) {
             ownerGrid[targetIdx] = winner.id;
             winner.tiles.push(targetIdx);
             loser.tiles = loser.tiles.filter(t => t !== targetIdx);
+
+            // Aggressive Expansion: 他国との関係悪化
+            nations.forEach(other => {
+                if (other.id !== winner.id && !other.isDead) {
+                    if (winner.relations[other.id] !== undefined) {
+                        winner.relations[other.id] -= 1; // 小さな蓄積
+                    }
+                }
+            });
+            worldTension = Math.min(100, worldTension + 0.1);
+
             return; // 1ターン1タイルのみ
         }
     }
