@@ -35,6 +35,11 @@
         
         /* Tooltip style overlay */
         #hover-info { position: absolute; background: rgba(0,0,0,0.8); padding: 5px; pointer-events: none; border-radius: 4px; display: none; font-size: 0.8em; z-index: 10; border: 1px solid #666; }
+        
+        /* Map Controls Overlay */
+        #map-controls { position: absolute; top: 10px; right: 10px; background: rgba(0,0,0,0.7); padding: 10px; border-radius: 5px; border: 1px solid #555; z-index: 20; display: flex; flex-direction: column; gap: 5px; color: #e0e0e0; width: 150px; }
+        #map-controls .control-row { display: flex; justify-content: space-between; align-items: center; font-size: 0.9em; }
+        #map-controls button { margin-top: 5px; width: 100%; padding: 5px; font-size: 0.9em; }
     </style>
 <link rel="apple-touch-icon" href="icon192x192.png">
 <link rel="icon" href="icon192x192.png">
@@ -107,6 +112,13 @@ if ('serviceWorker' in navigator) {
     <div id="canvas-container">
         <canvas id="gameCanvas"></canvas>
         <div id="hover-info"></div>
+        <div id="map-controls">
+            <div class="control-row">
+                <span>速度:</span>
+                <input type="range" id="simSpeed" min="1" max="10" value="5" style="width:100px;">
+            </div>
+            <button id="btn-pause">一時停止 / 再開</button>
+        </div>
     </div>
     
     <div id="sidebar">
@@ -132,9 +144,7 @@ if ('serviceWorker' in navigator) {
             <div class="stat-row"><span>年:</span> <span id="info-year">1</span></div>
             <div class="stat-row"><span>総人口:</span> <span id="info-pop">0</span></div>
             <div class="stat-row"><span>緊張度:</span> <span id="info-tension">0%</span></div>
-            <div class="stat-row"><span>速度:</span> <input type="range" id="simSpeed" min="1" max="10" value="5" style="width:100px;"></div>
             <button id="btn-map-mode" style="margin-bottom:10px;">地図モード: 政治</button>
-            <button id="btn-pause">一時停止 / 再開</button>
         </div>
 
         <div id="nation-panel" class="panel" style="display:none;">
