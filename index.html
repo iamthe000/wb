@@ -11,6 +11,8 @@
         #top-ui-bar { height: 50px; background: #1a1a1a; display: flex; align-items: center; justify-content: space-between; padding: 0 20px; border-bottom: 1px solid #333; z-index: 10; flex-shrink: 0; }
         #top-ui-bar .ui-group { display: flex; align-items: center; gap: 10px; font-size: 0.9em; }
         #top-ui-bar .ui-label { color: #aaa; margin-right: 5px; }
+        #top-ui-year, #top-ui-tension { display: inline-block; min-width: 3.5em; text-align: right; font-variant-numeric: tabular-nums; font-family: monospace; }
+        #top-ui-tension { min-width: 4em; }
         #canvas-wrapper { flex: 1; position: relative; overflow: hidden; cursor: crosshair; }
         canvas { display: block; image-rendering: pixelated; }
         #sidebar { width: 320px; background: #1a1a1a; padding: 20px; overflow-y: auto; box-shadow: -2px 0 10px rgba(0,0,0,0.8); display: flex; flex-direction: column; gap: 15px; border-left: 1px solid #333; }
@@ -19,6 +21,13 @@
             #container { flex-direction: column; }
             #sidebar { width: 100%; height: 40vh; border-left: none; border-top: 1px solid #333; box-sizing: border-box; }
             #canvas-container { height: 60vh; }
+            #top-ui-bar { padding: 0 10px; gap: 5px; }
+            #top-ui-bar .ui-group { gap: 5px; }
+            .ui-label { font-size: 0.8em; margin-right: 2px; }
+            #top-ui-year, #top-ui-tension { font-size: 0.9em; min-width: 3em; }
+            .ui-label-speed { display: none; }
+            #simSpeed { width: 60px !important; }
+            #btn-pause { padding: 4px 8px !important; font-size: 0.8em; }
         }
         
         h1, h2 { margin: 0 0 10px 0; color: #ccc; text-transform: uppercase; letter-spacing: 2px; font-weight: 300; }
@@ -112,12 +121,12 @@ if ('serviceWorker' in navigator) {
         <div id="top-ui-bar">
             <div class="ui-group">
                 <span class="ui-label">年:</span> <span id="top-ui-year" style="font-weight:bold; color:#fff;">1</span>
-                <span class="ui-label" style="margin-left: 15px;">世界緊張度:</span> <span id="top-ui-tension" style="font-weight:bold; color:#4db8ff;">0.0%</span>
+                <span class="ui-label" style="margin-left: 10px;">緊張度:</span> <span id="top-ui-tension" style="font-weight:bold; color:#4db8ff;">0.0%</span>
             </div>
             <div class="ui-group">
-                <span style="font-size:0.9em;">速度:</span>
+                <span class="ui-label-speed" style="font-size:0.9em;">速度:</span>
                 <input type="range" id="simSpeed" min="1" max="10" value="5" style="width:100px;">
-                <button id="btn-pause" style="width: auto; padding: 5px 10px; margin-top: 0; margin-left: 10px;">一時停止 / 再開</button>
+                <button id="btn-pause" style="width: auto; padding: 5px 10px; margin-top: 0; margin-left: 5px;">停止/再開</button>
             </div>
         </div>
         <div id="canvas-wrapper">
