@@ -69,6 +69,7 @@
             <div class="stat-row"><span>総人口:</span> <span id="info-pop">0</span></div>
             <div class="stat-row"><span>緊張度:</span> <span id="info-tension">0%</span></div>
             <div class="stat-row"><span>速度:</span> <input type="range" id="simSpeed" min="1" max="10" value="5" style="width:100px;"></div>
+            <button id="btn-map-mode" style="margin-bottom:10px;">地図モード: 政治</button>
             <button id="btn-pause">一時停止 / 再開</button>
         </div>
 
@@ -128,6 +129,7 @@ let nationIdCounter = 0;
 let isDrawing = true;
 let isFillMode = false;
 let currentBrush = 1; // 1:Land, 0:Water
+let mapMode = 'political'; // political or terrain
 let mapScale = 1.0;
 let isPaused = true;
 let simSpeed = 5;
@@ -227,6 +229,11 @@ function setupInput() {
 
     document.getElementById('btn-pause').addEventListener('click', () => {
         isPaused = !isPaused;
+    });
+
+    document.getElementById('btn-map-mode').addEventListener('click', (e) => {
+        mapMode = (mapMode === 'political' ? 'terrain' : 'political');
+        e.target.innerText = `地図モード: ${mapMode === 'political' ? '政治' : '地形'}`;
     });
 
     document.getElementById('simSpeed').addEventListener('input', (e) => {
@@ -731,13 +738,19 @@ function renderMap() {
             if (owner !== -1 && !isDrawing) {
                 const nat = nations.find(n => n.id === owner);
                 if (nat) {
-                    // 国の色をベースにするが、地形も見せる (透過させる)
-                    ctx.globalAlpha = 0.6;
-                    ctx.fillStyle = nat.color;
-                    ctx.fillRect(offsetX + x*TILE_SIZE, offsetY + y*TILE_SIZE, TILE_SIZE, TILE_SIZE);
-                    ctx.globalAlpha = 1.0;
+                    if (mapMode === 'political') {
+                        // 国の色をベースにするが、地形も見せる (透過させる)
+                        ctx.globalAlpha = 0.6;
+                        ctx.fillStyle = nat.color;
+                        ctx.fillRect(offsetX + x*TILE_SIZE, offsetY + y*TILE_SIZE, TILE_SIZE, TILE_SIZE);
+                        ctx.globalAlpha = 1.0;
+                    } else {
+                        // 地形をベースにする
+                        ctx.fillStyle = color;
+                        ctx.fillRect(offsetX + x*TILE_SIZE, offsetY + y*TILE_SIZE, TILE_SIZE, TILE_SIZE);
+                    }
                     
-                    // 山や川の場合は装飾
+                    // 山や川の場合は装飾 (常に表示)
                     if (type === 2) { // 山
                         ctx.fillStyle = "rgba(0,0,0,0.5)";
                         ctx.fillRect(offsetX + x*TILE_SIZE+1, offsetY + y*TILE_SIZE+1, TILE_SIZE-2, TILE_SIZE-2);
@@ -1131,8 +1144,22 @@ function simulateTick() {
             }
         }
         // 和平判定
-        else if (n.relations[target.id] > -20 && n.atWarWith.includes(target.id)) {
-            makePeace(n, target);
+        else if (n.atWarWith.includes(target.id)) {
+            let peaceChance = 0.005; // 基礎和平確率
+            if (n.relations[target.id] > -20) peaceChance += 0.02;
+            
+            // 地形による和平確率の上昇 (山や川が境界だと膠着しやすい)
+            const comp = getBoundaryComposition(n, target);
+            if (comp.total > 0) {
+                const roughTerrainRatio = (comp.mountain + comp.river) / comp.total;
+                if (roughTerrainRatio > 0.4) {
+                    peaceChance += 0.05; // 境界の40%以上が険しい地形で和平しやすくなる
+                }
+            }
+
+            if (Math.random() < peaceChance) {
+                makePeace(n, target);
+            }
         }
     });
 
@@ -1175,6 +1202,7 @@ function isNeighbor(n1, n2) {
     // 正確にするなら境界線リストを持つべきだが、今回はランダムピックで代用
     for(let i=0; i<50; i++) {
         let tile = n1.tiles[Math.floor(Math.random() * n1.tiles.length)];
+        if (tile === undefined) continue;
         let cx = tile % width;
         let cy = Math.floor(tile / width);
         let found = false;
@@ -1188,6 +1216,33 @@ function isNeighbor(n1, n2) {
         if(found) return true;
     }
     return false;
+}
+
+/**
+ * 境界線の地形構成を取得
+ */
+function getBoundaryComposition(n1, n2) {
+    let counts = {mountain: 0, river: 0, total: 0};
+    const samples = Math.min(n1.tiles.length, 100);
+    for(let i=0; i<samples; i++) {
+        let tile = n1.tiles[Math.floor(Math.random() * n1.tiles.length)];
+        if (tile === undefined) continue;
+        let cx = tile % width;
+        let cy = Math.floor(tile / width);
+        [[0,1],[0,-1],[1,0],[-1,0]].forEach(([dx, dy]) => {
+            let nx=cx+dx, ny=cy+dy;
+            if(nx>=0 && nx<width && ny>=0 && ny<height) {
+                let nIdx = ny*width+nx;
+                if(ownerGrid[nIdx] === n2.id) {
+                    counts.total++;
+                    const type = grid[nIdx];
+                    if (type === 2) counts.mountain++;
+                    else if (type === 3) counts.river++;
+                }
+            }
+        });
+    }
+    return counts;
 }
 
 function declareWar(n1, n2) {
@@ -1329,6 +1384,14 @@ function stealTerritory(winner, loser) {
         });
 
         if (targetIdx !== -1) {
+            // 地形による進軍速度の変動
+            const terrain = grid[targetIdx];
+            let difficulty = 1;
+            if (terrain === 2) difficulty = 4; // 山岳: 1/4の確率
+            if (terrain === 3) difficulty = 2; // 河川: 1/2の確率
+            
+            if (Math.random() > (1 / difficulty)) return; // 失敗（進軍停止）
+
             // 領土移動処理
             ownerGrid[targetIdx] = winner.id;
             winner.tiles.push(targetIdx);
