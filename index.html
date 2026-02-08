@@ -999,8 +999,8 @@ function loop() {
 }
 
 function renderMap() {
-    mapScale = Math.min(canvas.width / (width * TILE_SIZE), canvas.height / (height * TILE_SIZE));
-    if (mapScale > 1.0) mapScale = 1.0;
+    // 画面全体に収まるようにスケール調整（0.95倍のマージンを持たせる）
+    mapScale = Math.min(canvas.width / (width * TILE_SIZE), canvas.height / (height * TILE_SIZE)) * 0.95;
 
     ctx.save();
     ctx.translate(canvas.width / 2, canvas.height / 2);
