@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>Fantasy World Simulator</title>
+    <title>ファンタジー世界シミュレーター</title>
     <style>
         body { margin: 0; overflow: hidden; background: #0c0c0c; color: #e0e0e0; font-family: 'Segoe UI', 'Roboto', sans-serif; }
         #container { display: flex; height: 100vh; }
@@ -39,10 +39,10 @@
     </div>
     
     <div id="sidebar">
-        <h1>World Sim</h1>
+        <h1>世界シミュレーター</h1>
         
         <div id="menu-panel" class="panel">
-            <h2>1. Map Design</h2>
+            <h2>1. マップデザイン</h2>
             <p>左クリック: 陸地を描く<br>右クリック: 海に戻す</p>
             <div>
                 サイズ: <select id="mapSize">
@@ -51,41 +51,46 @@
                     <option value="256">大 (256x256)</option>
                 </select>
             </div>
-            <button id="btn-fill" style="margin-bottom:10px;">塗りつぶしモード: OFF</button>
+            <button id="btn-fill" style="margin-bottom:10px;">塗りつぶしモード: オフ</button>
             <button id="btn-generate">世界を生成 (シミュレーション開始)</button>
         </div>
 
         <div id="sim-panel" class="panel" style="display:none;">
-            <h2>2. World Info</h2>
-            <div class="stat-row"><span>Year:</span> <span id="info-year">1</span></div>
-            <div class="stat-row"><span>Total Pop:</span> <span id="info-pop">0</span></div>
-            <div class="stat-row"><span>Tension:</span> <span id="info-tension">0%</span></div>
+            <h2>2. 世界情勢</h2>
+            <div class="stat-row"><span>年:</span> <span id="info-year">1</span></div>
+            <div class="stat-row"><span>総人口:</span> <span id="info-pop">0</span></div>
+            <div class="stat-row"><span>緊張度:</span> <span id="info-tension">0%</span></div>
+            <div class="stat-row"><span>速度:</span> <input type="range" id="simSpeed" min="1" max="10" value="5" style="width:100px;"></div>
             <button id="btn-pause">一時停止 / 再開</button>
         </div>
 
         <div id="nation-panel" class="panel" style="display:none;">
-            <h2 id="n-name">Nation Name</h2>
-            <div class="stat-row"><span>Religion:</span> <span id="n-religion"></span></div>
-            <div class="stat-row"><span>Tech:</span> <span id="n-tech"></span></div>
+            <h2 id="n-name">国家名</h2>
+            <div class="stat-row"><span>指導者:</span> <span id="n-leader"></span></div>
+            <div class="stat-row"><span>体制:</span> <span id="n-gov"></span></div>
+            <div class="stat-row"><span>宗教:</span> <span id="n-religion"></span></div>
+            <div class="stat-row"><span>技術:</span> <span id="n-tech"></span></div>
+            <div class="stat-row"><span>安定度:</span> <span id="n-stability"></span></div>
             
             <hr style="border-color:#555">
             
-            <div class="stat-row"><span>GDP:</span> <span id="n-gdp"></span></div>
+            <div class="stat-row"><span>国内総生産(GDP):</span> <span id="n-gdp"></span></div>
             <div class="bar-bg"><div id="bar-gdp" class="bar-fill" style="width:0; background:#f1c40f"></div></div>
             
-            <div class="stat-row"><span>Population:</span> <span id="n-pop"></span></div>
+            <div class="stat-row"><span>人口:</span> <span id="n-pop"></span></div>
             <div class="bar-bg"><div id="bar-pop" class="bar-fill" style="width:0; background:#2ecc71"></div></div>
             
-            <div class="stat-row"><span>Military:</span> <span id="n-mil"></span></div>
+            <div class="stat-row"><span>軍事力:</span> <span id="n-mil"></span></div>
             <div class="bar-bg"><div id="bar-mil" class="bar-fill" style="width:0; background:#e74c3c"></div></div>
 
-            <div class="stat-row"><span>Industry:</span> <span id="n-ind"></span></div>
-            <div class="stat-row"><span>Tanks:</span> <span id="n-tanks"></span></div>
-            <div class="stat-row"><span>Quality:</span> <span id="n-qual"></span></div>
+            <div class="stat-row"><span>工業力:</span> <span id="n-ind"></span></div>
+            <div class="stat-row"><span>戦車数:</span> <span id="n-tanks"></span></div>
+            <div class="stat-row"><span>海軍力:</span> <span id="n-ships"></span></div>
+            <div class="stat-row"><span>軍の質:</span> <span id="n-qual"></span></div>
         </div>
 
         <div class="panel">
-            <h2>Event Log</h2>
+            <h2>イベントログ</h2>
             <div id="log"></div>
         </div>
     </div>
@@ -103,17 +108,20 @@ const COLORS = {
     RIVER: '#2980b9',
     SNOW: '#ecf0f1'
 };
-const RELIGIONS = ['Sun God', 'Sea Spirits', 'Machine Cult', 'Nature Order', 'Chaos', 'Void'];
-const TECH_LEVELS = ['Primitive', 'Agrarian', 'Industrial', 'Modern', 'Futuristic'];
+const RELIGIONS = ['太陽神教', '海霊信仰', '機械崇拝', '自然の秩序', '混沌', '虚無'];
+const TECH_LEVELS = ['原始的', '農耕社会', '工業化', '現代的', '未来的'];
 
 // グローバル変数
 let canvas, ctx, width, height;
 let grid = []; // 0:Water, 1:Land, 2:Mountain, 3:River
 let ownerGrid = []; // ID of the nation owning this tile (-1 for none)
 let nations = [];
+let nationIdCounter = 0;
 let isDrawing = true;
 let isFillMode = false;
-let isPaused = false;
+let isPaused = true;
+let simSpeed = 5;
+let frameCounter = 0;
 let worldTension = 0;
 let year = 1;
 let animationFrame;
@@ -194,9 +202,13 @@ function setupInput() {
         isPaused = !isPaused;
     });
 
+    document.getElementById('simSpeed').addEventListener('input', (e) => {
+        simSpeed = parseInt(e.target.value);
+    });
+
     document.getElementById('btn-fill').addEventListener('click', (e) => {
         isFillMode = !isFillMode;
-        e.target.innerText = `塗りつぶしモード: ${isFillMode ? 'ON' : 'OFF'}`;
+        e.target.innerText = `塗りつぶしモード: ${isFillMode ? 'オン' : 'オフ'}`;
         e.target.style.background = isFillMode ? '#4db8ff' : '#34495e';
         e.target.style.color = isFillMode ? '#000' : '#ecf0f1';
     });
@@ -294,7 +306,7 @@ function handleHover(e) {
                 hoverInfo.style.display = 'block';
                 hoverInfo.style.left = (e.clientX + 10) + 'px';
                 hoverInfo.style.top = (e.clientY + 10) + 'px';
-                hoverInfo.innerHTML = `<b>${n.name}</b><br>Pop: ${formatNum(n.pop)}`;
+                hoverInfo.innerHTML = `<b>${n.name}</b><br>人口: ${formatNum(n.pop)}`;
                 return;
             }
         }
@@ -323,7 +335,7 @@ function generateWorld() {
     // 2. 国家生成
     spawnNations();
 
-    log("World Generated. History begins.", "log-info");
+    log("世界が生成されました。歴史が始まります。", "log-info");
 }
 
 function generateTerrainFeatures() {
@@ -397,13 +409,26 @@ function generateTerrainFeatures() {
 }
 
 /**
+ * 都市クラス
+ */
+class City {
+    constructor(name, tileIdx, nationId) {
+        this.name = name;
+        this.tileIdx = tileIdx;
+        this.nationId = nationId;
+        this.unrest = 0;
+    }
+}
+
+/**
  * 国家クラス
  */
 class Nation {
     constructor(id, x, y) {
-        this.id = id;
+        this.id = (id !== undefined) ? id : nationIdCounter++;
         this.color = `hsl(${Math.random()*360}, 70%, 50%)`;
-        this.name = this.generateName();
+        this.baseName = this.generateBaseName();
+        this.regimeNumber = 1;
         this.religion = RELIGIONS[Math.floor(Math.random() * RELIGIONS.length)];
         
         // Stats
@@ -412,31 +437,116 @@ class Nation {
         this.industry = 10 + Math.floor(Math.random() * 50);
         this.tech = 0; // Index of TECH_LEVELS
         
+        // Politics
+        const startGovs = ["絶対王政", "共和制", "帝国", "公国", "連邦制"];
+        this.govType = startGovs[Math.floor(Math.random() * startGovs.length)];
+        this.updateName();
+        this.stability = 100;
+        this.unrest = 0;
+        this.leader = this.generateLeaderName();
+        
         // Military
         this.soldiers = Math.floor(this.pop * 0.1);
         this.soldierQuality = 0.5 + Math.random(); // 0.5 - 1.5
         this.equipQuality = 0.5 + Math.random();
         this.tanks = 0;
+        this.ships = 0;
         
         // Diplomacy
         this.relations = {}; // { nationId: value (-100 to 100) }
         this.atWarWith = []; // list of nation IDs
         this.isDead = false;
+        this.isRebel = false;
+        this.parentName = "";
+        this.rebellionCooldown = 0;
         
+        this.cities = [];
+
         // 初期領土
-        ownerGrid[y * width + x] = id;
-        this.tiles = [y * width + x];
+        if (x !== undefined && y !== undefined) {
+            const tileIdx = y * width + x;
+            ownerGrid[tileIdx] = this.id;
+            this.tiles = [tileIdx];
+            // 初期都市（首都）の生成
+            this.cities.push(new City(this.baseName + "府", tileIdx, this.id));
+        } else {
+            this.tiles = [];
+        }
     }
 
-    generateName() {
-        const syl = ["Ar", "Ban", "Ci", "Dor", "El", "Fa", "Gor", "Hun", "Il", "Jo", "Ka", "Lor", "Mi", "Nor", "Pa", "Qu", "Ro", "Sa", "Ti", "Ur", "Va", "Xi", "Zu"];
-        return syl[Math.floor(Math.random()*syl.length)] + syl[Math.floor(Math.random()*syl.length)] + (Math.random()>0.5 ? "ia" : "land");
+    generateBaseName() {
+        const syl = ["アル", "バン", "シー", "ドル", "エル", "ファ", "ゴル", "ハン", "イル", "ジョ", "カ", "ロル", "ミ", "ノル", "パ", "ク", "ロ", "サ", "ティ", "ウル", "ヴァ", "キ", "ズ"];
+        return syl[Math.floor(Math.random()*syl.length)] + syl[Math.floor(Math.random()*syl.length)];
+    }
+
+    generateCityName() {
+        const syl = ["アル", "バン", "シー", "ドル", "エル", "ファ", "ゴル", "ハン", "イル", "ジョ", "カ", "ロル", "ミ", "ノル", "パ", "ク", "ロ", "サ", "ティ", "ウル", "ヴァ", "キ", "ズ"];
+        const suffix = ["市", "府", "京", "要塞", "港", "都"];
+        return syl[Math.floor(Math.random()*syl.length)] + syl[Math.floor(Math.random()*syl.length)] + suffix[Math.floor(Math.random()*suffix.length)];
+    }
+
+    updateName() {
+        const suffixes = {
+            "絶対王政": "王国",
+            "共和制": "共和国",
+            "帝国": "帝国",
+            "公国": "公国",
+            "連邦制": "連邦",
+            "独裁制": "国",
+            "軍事政権": "国",
+            "革命政府": "革命政府",
+            "臨時政府": "臨時政府",
+            "正統政府": "正統政府"
+        };
+        let suffix = suffixes[this.govType] || "国";
+        
+        if (this.govType === "共和制" && this.regimeNumber > 1) {
+            this.name = this.baseName + suffix + "第" + this.regimeNumber + "政";
+        } else {
+            this.name = this.baseName + suffix;
+        }
+    }
+
+    generateLeaderName() {
+        const first = ["ヨハン", "フリードリヒ", "ルイ", "チャールズ", "アレクサンダー", "ニコライ", "マリア", "エリザベス", "ヴィクトリア", "カトリーヌ", "スレイマン", "カンヒ", "メイジ", "グスタフ", "カメハメハ"];
+        const last = ["世", "大王", "公", "卿", "・ボナパルト", "・ロマノフ", "・ハプスブルク", "・ブルボン", "・テューダー", "・ホーエンツォレルン"];
+        if (Math.random() < 0.7) {
+            return first[Math.floor(Math.random() * first.length)] + (Math.random() < 0.5 ? last[Math.floor(Math.random() * last.length)] : "");
+        } else {
+            // 日本風
+            const jpFirst = ["織田", "豊臣", "徳川", "武田", "上杉", "毛利", "島津", "伊達"];
+            const jpLast = ["信長", "秀吉", "家康", "信玄", "謙信", "元就", "義久", "政宗"];
+            return jpFirst[Math.floor(Math.random() * jpFirst.length)] + jpLast[Math.floor(Math.random() * jpLast.length)];
+        }
     }
 
     getMilitaryPower() {
         // 軍事力計算式: 兵数 * 質 * 装備 * (戦車ボーナス)
         let tankBonus = 1 + (this.tanks * 0.05);
         return this.soldiers * this.soldierQuality * this.equipQuality * tankBonus * (1 + this.tech * 0.5);
+    }
+
+    getNavalPower() {
+        return this.ships * (1 + this.tech * 0.5) * this.equipQuality;
+    }
+
+    isCoastal() {
+        // 少なくとも1つのタイルが海(0)に接しているか (サンプリング)
+        const samples = Math.min(this.tiles.length, 30);
+        for(let i=0; i<samples; i++) {
+            let tile = this.tiles[Math.floor(Math.random() * this.tiles.length)];
+            let cx = tile % width;
+            let cy = Math.floor(tile / width);
+            let found = false;
+            [[0,1],[0,-1],[1,0],[-1,0]].forEach(([dx, dy]) => {
+                let nx=cx+dx, ny=cy+dy;
+                if(nx>=0 && nx<width && ny>=0 && ny<height) {
+                    if(grid[ny*width+nx] === 0) found = true;
+                }
+            });
+            if(found) return true;
+        }
+        return false;
     }
 }
 
@@ -448,6 +558,7 @@ function spawnNations() {
 
     // 土地の広さに応じて国家数を決定
     const numNations = Math.max(2, Math.floor(landTiles.length / 50)); 
+    nationIdCounter = 0;
     
     for(let i=0; i<numNations; i++) {
         if(landTiles.length === 0) break;
@@ -462,7 +573,7 @@ function spawnNations() {
         // 既に誰かの領土ならスキップ（初期配置は離す）
         if(ownerGrid[tileIdx] !== -1) continue;
         
-        nations.push(new Nation(i, x, y));
+        nations.push(new Nation(undefined, x, y));
     }
     
     // 初期領土拡大 (Flood fill的)
@@ -522,7 +633,9 @@ function loop() {
     renderMap();
     
     if (!isDrawing && !isPaused) {
-        if (Math.random() < 0.2) { // 更新頻度調整
+        frameCounter++;
+        if (frameCounter >= (11 - simSpeed)) {
+            frameCounter = 0;
             simulateTick();
             year++;
             document.getElementById('info-year').innerText = year;
@@ -609,10 +722,215 @@ function renderMap() {
         }
     }
 
+    // 都市の描画
+    if (!isDrawing) {
+        nations.forEach(n => {
+            if (n.isDead) return;
+            n.cities.forEach(city => {
+                const cx = city.tileIdx % width;
+                const cy = Math.floor(city.tileIdx / width);
+                
+                // 都市の影/縁
+                ctx.fillStyle = "rgba(0,0,0,0.5)";
+                ctx.beginPath();
+                ctx.arc(offsetX + cx*TILE_SIZE + TILE_SIZE/2, offsetY + cy*TILE_SIZE + TILE_SIZE/2, TILE_SIZE/2, 0, Math.PI*2);
+                ctx.fill();
+                
+                // 都市本体
+                ctx.fillStyle = "#fff";
+                ctx.beginPath();
+                ctx.arc(offsetX + cx*TILE_SIZE + TILE_SIZE/2, offsetY + cy*TILE_SIZE + TILE_SIZE/2, TILE_SIZE/3, 0, Math.PI*2);
+                ctx.fill();
+            });
+        });
+    }
+
     // 外枠
     ctx.strokeStyle = "#555";
     ctx.lineWidth = 1;
     ctx.strokeRect(offsetX, offsetY, width*TILE_SIZE, height*TILE_SIZE);
+}
+
+function handlePolitics(n) {
+    if (n.isDead) return;
+
+    // 指導者の交代
+    if (Math.random() < 0.005) {
+        const oldLeader = n.leader;
+        n.leader = n.generateLeaderName();
+        const stabChange = Math.floor(Math.random() * 30) - 20; // -20 to +10
+        n.stability = clamp(n.stability + stabChange, 0, 100);
+        log(`${n.name}の指導者が${oldLeader}から${n.leader}に交代しました。(安定度: ${stabChange > 0 ? "+" : ""}${stabChange})`, "log-info");
+    }
+
+    // 王政国家向けのランダムイベント (共和派の台頭など)
+    if ((n.govType === "絶対王政" || n.govType === "帝国") && Math.random() < 0.002) {
+        const events = [
+            { msg: "共和派の活動が活発化しています。", stab: -15 },
+            { msg: "啓蒙思想が広まり、旧体制への不満が高まっています。", stab: -10 },
+            { msg: "宮廷内での権力争いが発生しました。", stab: -12 }
+        ];
+        const event = events[Math.floor(Math.random() * events.length)];
+        n.stability = clamp(n.stability + event.stab, 0, 100);
+        log(`${n.name}: ${event.msg} (安定度: ${event.stab})`, "log-war");
+    }
+
+    // 安定度の自然変動
+    if (n.atWarWith.length > 0) {
+        n.stability -= 0.4;
+    } else {
+        n.stability = Math.min(100, n.stability + 0.5);
+    }
+
+    // 不満度の更新
+    n.unrest = 100 - n.stability;
+
+    // 都市ごとの不満度更新
+    n.cities.forEach((city, idx) => {
+        let cityUnrest = n.unrest + (Math.random() * 20 - 10);
+        // 首都(index 0)からの距離による不満度増加
+        if (idx > 0) {
+            const capital = n.cities[0];
+            const dx = (city.tileIdx % width) - (capital.tileIdx % width);
+            const dy = Math.floor(city.tileIdx / width) - Math.floor(capital.tileIdx / width);
+            const dist = Math.sqrt(dx*dx + dy*dy);
+            cityUnrest += dist / 5;
+        }
+        city.unrest = clamp(cityUnrest, 0, 100);
+    });
+
+    // 反乱クールダウンの消化
+    if (n.rebellionCooldown > 0) n.rebellionCooldown--;
+
+    // 都市単位の内戦判定
+    let rebellingCities = [];
+    if (n.rebellionCooldown === 0 && n.cities.length > 0) {
+        n.cities.forEach(city => {
+            if (city.unrest > 75 && Math.random() < 0.005) {
+                rebellingCities.push(city);
+            }
+        });
+    }
+
+    if (rebellingCities.length > 0) {
+        // 周囲の不満が高い都市も誘い込む
+        n.cities.forEach(city => {
+            if (!rebellingCities.includes(city) && city.unrest > 50) {
+                let isNear = rebellingCities.some(rc => {
+                    const dx = (city.tileIdx % width) - (rc.tileIdx % width);
+                    const dy = Math.floor(city.tileIdx / width) - Math.floor(rc.tileIdx / width);
+                    return Math.sqrt(dx*dx + dy*dy) < 30;
+                });
+                if (isNear && Math.random() < 0.5) rebellingCities.push(city);
+            }
+        });
+        triggerCityRebellion(n, rebellingCities);
+    }
+
+    // 政変の判定
+    if (n.stability < 50 && Math.random() < 0.002) {
+        const oldName = n.name;
+        const oldGov = n.govType;
+        n.govType = (Math.random() > 0.5) ? "独裁制" : "軍事政権";
+        n.updateName();
+        n.stability = Math.max(0, n.stability - 30);
+        log(`${oldName}で政変が発生！ ${oldGov}から${n.govType}へ体制が変わり、${n.name}となりました。`, "log-war");
+    }
+
+    // 共和制への移行
+    if (n.govType !== "共和制" && n.tech >= 3 && n.stability > 80 && Math.random() < 0.001) {
+        const oldName = n.name;
+        n.govType = "共和制";
+        n.regimeNumber++;
+        n.updateName();
+        log(`${oldName}は近代化に伴い共和制へ移行し、${n.name}となりました。`, "log-peace");
+    }
+
+    // 反乱軍の正統化
+    if (n.isRebel && n.stability > 70 && n.tiles.length > 25 && Math.random() < 0.01) {
+        n.isRebel = false;
+        const oldName = n.name;
+        const newGovs = ["共和制", "帝国", "連邦制"];
+        n.govType = newGovs[Math.floor(Math.random() * newGovs.length)];
+        n.updateName();
+        log(`${oldName}は安定した統治を確立し、${n.name}として国家の正統性を主張し始めました。`, "log-peace");
+    }
+}
+
+function triggerCityRebellion(n, cities) {
+    // 反乱軍の生成
+    const rebel = new Nation();
+    rebel.baseName = n.baseName;
+    rebel.parentName = n.baseName;
+    rebel.isRebel = true;
+
+    // かっこいい反乱軍の名称生成
+    const rebelTypes = [
+        { name: "臨時政府", gov: "臨時政府" },
+        { name: "立憲派", gov: "革命政府" },
+        { name: "正統政府", gov: "正統政府" },
+        { name: "救国戦線", gov: "革命政府" },
+        { name: "人民委員会", gov: "革命政府" }
+    ];
+    
+    // 特別な名称: 共和国第n政 (親が共和国の場合)
+    if (n.govType === "共和制" && Math.random() < 0.4) {
+        rebel.govType = "共和制";
+        rebel.regimeNumber = n.regimeNumber + 1;
+        rebel.updateName();
+    } else {
+        const type = rebelTypes[Math.floor(Math.random() * rebelTypes.length)];
+        rebel.govType = type.gov;
+        // 都市名を冠した名称にする (最初の都市)
+        const prefix = cities[0].name.substring(0, cities[0].name.length - 1);
+        rebel.name = prefix + type.name;
+    }
+
+    rebel.rebellionCooldown = 200; // 初期無敵状態
+    n.rebellionCooldown = 200; // 親国も一定期間再発防止
+    rebel.color = `hsl(${Math.random()*360}, 80%, 40%)`;
+    rebel.tech = n.tech;
+    rebel.religion = n.religion;
+    
+    // 領土と都市の委譲
+    cities.forEach(city => {
+        const cityIdx = city.tileIdx;
+        const cx = cityIdx % width;
+        const cy = Math.floor(cityIdx / width);
+        const radius = 6;
+        
+        for (let dy = -radius; dy <= radius; dy++) {
+            for (let dx = -radius; dx <= radius; dx++) {
+                const nx = cx + dx;
+                const ny = cy + dy;
+                if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
+                    const idx = ny * width + nx;
+                    if (ownerGrid[idx] === n.id) {
+                        ownerGrid[idx] = rebel.id;
+                        rebel.tiles.push(idx);
+                        n.tiles = n.tiles.filter(t => t !== idx);
+                    }
+                }
+            }
+        }
+        city.nationId = rebel.id;
+        rebel.cities.push(city);
+    });
+    n.cities = n.cities.filter(c => !cities.includes(c));
+
+    // 兵力と人口の分配
+    const ratio = cities.length / (n.cities.length + cities.length);
+    rebel.pop = Math.floor(n.pop * ratio);
+    n.pop = Math.floor(n.pop - rebel.pop);
+    rebel.soldiers = Math.floor(n.soldiers * ratio * 0.8);
+    n.soldiers = Math.floor(n.soldiers - rebel.soldiers);
+
+    if (rebel.tiles.length > 0) {
+        nations.push(rebel);
+        declareWar(n, rebel);
+        log(`${n.name}で内戦が発生！ ${cities.map(c => c.name).join('、')}が${rebel.name}として蜂起しました。`, "log-war");
+        n.stability = Math.max(0, n.stability - 20);
+    }
 }
 
 function simulateTick() {
@@ -623,6 +941,19 @@ function simulateTick() {
     // 1. 内政フェーズ
     nations.forEach(n => {
         if (n.isDead) return;
+        
+        handlePolitics(n);
+
+        // 都市の建設
+        if (n.tiles.length > (n.cities.length + 1) * 50 && Math.random() < 0.05) {
+            const potentialTiles = n.tiles.filter(t => !n.cities.some(c => c.tileIdx === t));
+            if (potentialTiles.length > 0) {
+                const newTile = potentialTiles[Math.floor(Math.random() * potentialTiles.length)];
+                const cityName = n.generateCityName();
+                n.cities.push(new City(cityName, newTile, n.id));
+                log(`${n.name}が新たな都市「${cityName}」を建設しました。`, "log-info");
+            }
+        }
 
         // 人口増加: 領土面積と技術に基づくロジスティック回帰モデル
         let capacity = n.tiles.length * 1000 * (1 + n.tech * 0.5);
@@ -649,6 +980,12 @@ function simulateTick() {
         if (n.tech >= 2 && milBudget > 100) {
             n.tanks++;
             milBudget -= 50;
+        }
+        
+        // 海軍建造 (技術レベル2以上かつ海岸線がある場合)
+        if (n.tech >= 2 && milBudget > 150 && n.isCoastal()) {
+            n.ships++;
+            milBudget -= 100;
         }
 
         totalPop += n.pop;
@@ -681,7 +1018,7 @@ function simulateTick() {
         // ボーダーインシデント (突発的な悪化)
         if (neighbor && Math.random() < 0.05) {
             change -= 40;
-            log(`INCIDENT: Tension between ${n.name} and ${target.name}!`, "log-war");
+            log(`偶発的衝突: ${n.name}と${target.name}の間で緊張が高まっています！`, "log-war");
         }
 
         n.relations[target.id] = clamp(n.relations[target.id] + change, -100, 100);
@@ -696,7 +1033,7 @@ function simulateTick() {
         // 野心による開戦 (圧倒的有利な場合)
         if (neighbor && n.getMilitaryPower() > target.getMilitaryPower() * 2 && Math.random() < 0.05) {
             if (!n.atWarWith.includes(target.id)) {
-                log(`AMBITION: ${n.name} sees an opportunity to expand into ${target.name}!`, "log-war");
+                log(`野心: ${n.name}は${target.name}への領土拡大の好機を見出しました！`, "log-war");
                 declareWar(n, target);
             }
         }
@@ -717,6 +1054,11 @@ function simulateTick() {
             // 戦闘処理
             if (isNeighbor(attacker, defender)) {
                 battle(attacker, defender);
+            } else {
+                // 非隣接国への上陸作戦
+                if (attacker.tech >= 2 && Math.random() < 0.1) {
+                    navalLanding(attacker, defender);
+                }
             }
         });
     });
@@ -725,7 +1067,7 @@ function simulateTick() {
     nations.forEach(n => {
         if (!n.isDead && n.tiles.length === 0) {
             n.isDead = true;
-            log(`${n.name} has fallen!`, "log-war");
+            log(`${n.name}が滅亡しました！`, "log-war");
             // 戦争状態解除
             nations.forEach(other => {
                 other.atWarWith = other.atWarWith.filter(id => id !== n.id);
@@ -760,13 +1102,13 @@ function declareWar(n1, n2) {
     n1.atWarWith.push(n2.id);
     if(!n2.atWarWith.includes(n1.id)) n2.atWarWith.push(n1.id);
     worldTension = Math.min(100, worldTension + 5);
-    log(`WAR: ${n1.name} declared war on ${n2.name}! (Tension: ${worldTension.toFixed(1)}%)`, "log-war");
+    log(`戦争: ${n1.name}が${n2.name}に宣戦布告しました！（緊張度: ${worldTension.toFixed(1)}%）`, "log-war");
 }
 
 function makePeace(n1, n2) {
     n1.atWarWith = n1.atWarWith.filter(id => id !== n2.id);
     n2.atWarWith = n2.atWarWith.filter(id => id !== n1.id);
-    log(`PEACE: ${n1.name} and ${n2.name} signed a truce.`, "log-peace");
+    log(`和平: ${n1.name}と${n2.name}が停戦合意しました。`, "log-peace");
 }
 
 function battle(attacker, defender) {
@@ -789,6 +1131,49 @@ function battle(attacker, defender) {
     } else {
         // 攻撃失敗、兵を失う
         attacker.soldiers = Math.max(0, Math.floor(attacker.soldiers * 0.98));
+    }
+}
+
+function navalLanding(attacker, defender) {
+    if (!attacker.isCoastal() || !defender.isCoastal()) return;
+    if (attacker.ships < 5) return; // ある程度の海軍力が必要
+
+    const atkNaval = attacker.getNavalPower() * (0.8 + Math.random()*0.4);
+    const defNaval = defender.getNavalPower() * (0.8 + Math.random()*0.4);
+
+    if (atkNaval > defNaval) {
+        // 上陸成功: 敵の海岸タイルを1つ奪う
+        stealCoastalTerritory(attacker, defender);
+        attacker.ships = Math.max(0, Math.floor(attacker.ships * 0.95)); // 消耗
+    } else {
+        // 上陸失敗: 海軍力消耗
+        attacker.ships = Math.max(0, Math.floor(attacker.ships * 0.8));
+    }
+}
+
+function stealCoastalTerritory(winner, loser) {
+    // 敗者の領土のうち、海に接しているタイルを探す
+    for(let i=0; i<100; i++) {
+        let tile = loser.tiles[Math.floor(Math.random() * loser.tiles.length)];
+        let cx = tile % width;
+        let cy = Math.floor(tile / width);
+        
+        let isCoast = false;
+        [[0,1],[0,-1],[1,0],[-1,0]].forEach(([dx, dy]) => {
+            let nx=cx+dx, ny=cy+dy;
+            if(nx>=0 && nx<width && ny>=0 && ny<height) {
+                if(grid[ny*width+nx] === 0) isCoast = true;
+            }
+        });
+
+        if (isCoast) {
+            ownerGrid[tile] = winner.id;
+            winner.tiles.push(tile);
+            loser.tiles = loser.tiles.filter(t => t !== tile);
+            loser.stability -= 10;
+            log(`海軍作戦: ${winner.name}が${loser.name}への上陸作戦に成功しました！`, "log-war");
+            return;
+        }
     }
 }
 
@@ -816,6 +1201,8 @@ function stealTerritory(winner, loser) {
             winner.tiles.push(targetIdx);
             loser.tiles = loser.tiles.filter(t => t !== targetIdx);
 
+            loser.stability -= 5;
+
             // Aggressive Expansion: 他国との関係悪化
             nations.forEach(other => {
                 if (other.id !== winner.id && !other.isDead) {
@@ -841,8 +1228,11 @@ function updateNationPanel() {
 
     document.getElementById('n-name').innerText = n.name + (n.isDead ? " (滅亡)" : "");
     document.getElementById('n-name').style.color = n.color;
+    document.getElementById('n-leader').innerText = n.leader;
+    document.getElementById('n-gov').innerText = n.govType;
     document.getElementById('n-religion').innerText = n.religion;
     document.getElementById('n-tech').innerText = TECH_LEVELS[n.tech];
+    document.getElementById('n-stability').innerText = Math.floor(n.stability) + "%";
     
     document.getElementById('n-gdp').innerText = formatNum(n.gdp);
     document.getElementById('bar-gdp').style.width = Math.min(100, n.gdp / 1000) + "%";
@@ -855,6 +1245,7 @@ function updateNationPanel() {
     
     document.getElementById('n-ind').innerText = n.industry;
     document.getElementById('n-tanks').innerText = n.tanks;
+    document.getElementById('n-ships').innerText = n.ships;
     document.getElementById('n-qual').innerText = n.soldierQuality.toFixed(2);
 }
 
@@ -868,8 +1259,8 @@ function log(msg, className) {
 }
 
 function formatNum(num) {
-    if (num >= 1000000) return (num/1000000).toFixed(1) + "M";
-    if (num >= 1000) return (num/1000).toFixed(1) + "k";
+    if (num >= 100000000) return (num/100000000).toFixed(1) + "億";
+    if (num >= 10000) return (num/10000).toFixed(1) + "万";
     return Math.floor(num);
 }
 
