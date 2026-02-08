@@ -47,6 +47,12 @@ if ('serviceWorker' in navigator) {
 </head>
 <body>
 
+<div id="history-modal" style="display:none; position:fixed; top:50%; left:50%; transform:translate(-50%, -50%); background:#222; border:1px solid #444; padding:20px; z-index:1000; width:300px; max-height:80vh; overflow-y:auto; box-shadow: 0 0 20px rgba(0,0,0,0.8);">
+    <h2 style="margin-top:0; border-bottom:1px solid #555; padding-bottom:5px;">国家系譜</h2>
+    <div id="history-list" style="font-size:0.9em; line-height:1.4;"></div>
+    <button onclick="document.getElementById('history-modal').style.display='none'" style="margin-top:15px;">閉じる</button>
+</div>
+
 <div id="container">
     <div id="canvas-container">
         <canvas id="gameCanvas"></canvas>
@@ -104,6 +110,7 @@ if ('serviceWorker' in navigator) {
             <div class="stat-row"><span>戦車数:</span> <span id="n-tanks"></span></div>
             <div class="stat-row"><span>海軍力:</span> <span id="n-ships"></span></div>
             <div class="stat-row"><span>軍の質:</span> <span id="n-qual"></span></div>
+            <button id="btn-history" style="margin-top:10px; background:#5d4037;">国家系譜を見る</button>
         </div>
 
         <div class="panel">
@@ -150,6 +157,21 @@ let selectedNationId = -1;
 // マウス操作用
 let mousePressed = false;
 let mouseButton = 0; // 0:Left, 2:Right
+
+function isNationNameTaken(name, excludeId = -1) {
+    return nations.some(n => n.id !== excludeId && n.name === name);
+}
+
+function isBaseNameTaken(name, excludeId = -1) {
+    return nations.some(n => n.id !== excludeId && n.baseName === name);
+}
+
+function isCityNameTaken(name) {
+    for (const n of nations) {
+        if (n.cities.some(c => c.name === name)) return true;
+    }
+    return false;
+}
 
 /**
  * 初期化
@@ -259,6 +281,26 @@ function setupInput() {
         currentBrush = currentBrush === 1 ? 0 : 1;
         e.target.innerText = `ブラシ: ${currentBrush === 1 ? '陸地' : '海'}`;
         e.target.style.background = currentBrush === 1 ? '#34495e' : '#2980b9';
+    });
+
+    document.getElementById('btn-history').addEventListener('click', () => {
+        if (selectedNationId === -1) return;
+        const n = nations.find(nat => nat.id === selectedNationId);
+        if (!n) return;
+        
+        const list = document.getElementById('history-list');
+        list.innerHTML = '';
+        
+        n.history.forEach(h => {
+            const item = document.createElement('div');
+            item.style.marginBottom = "5px";
+            item.style.borderBottom = "1px solid #333";
+            item.style.paddingBottom = "2px";
+            item.innerText = `[Y${h.year}] ${h.event}`;
+            list.appendChild(item);
+        });
+        
+        document.getElementById('history-modal').style.display = 'block';
     });
 }
 
@@ -567,6 +609,7 @@ class Nation {
         this.puppetSince = 0;
         
         this.cities = [];
+        this.history = [];
 
         // 初期領土
         if (x !== undefined && y !== undefined) {
@@ -575,46 +618,80 @@ class Nation {
             this.tiles = [tileIdx];
             // 初期都市（首都）の生成
             this.cities.push(new City(this.baseName + "府", tileIdx, this.id));
+            this.addHistory("建国 (Founded)");
         } else {
             this.tiles = [];
         }
     }
 
+    addHistory(event) {
+        this.history.push({ year: year, event: event });
+    }
+
     generateBaseName() {
         const syl = ["アル", "バン", "シー", "ドル", "エル", "ファ", "ゴル", "ハン", "イル", "ジョ", "カ", "ロル", "ミ", "ノル", "パ", "ク", "ロ", "サ", "ティ", "ウル", "ヴァ", "キ", "ズ"];
-        return syl[Math.floor(Math.random()*syl.length)] + syl[Math.floor(Math.random()*syl.length)];
+        for(let i=0; i<100; i++) {
+            let name = syl[Math.floor(Math.random()*syl.length)] + syl[Math.floor(Math.random()*syl.length)];
+            if (!isBaseNameTaken(name, this.id)) return name;
+        }
+        return syl[Math.floor(Math.random()*syl.length)] + syl[Math.floor(Math.random()*syl.length)] + Math.floor(Math.random()*100);
     }
 
     generateCityName() {
         const syl = ["アル", "バン", "シー", "ドル", "エル", "ファ", "ゴル", "ハン", "イル", "ジョ", "カ", "ロル", "ミ", "ノル", "パ", "ク", "ロ", "サ", "ティ", "ウル", "ヴァ", "キ", "ズ"];
         const suffix = ["市", "府", "京", "要塞", "港", "都"];
-        return syl[Math.floor(Math.random()*syl.length)] + syl[Math.floor(Math.random()*syl.length)] + suffix[Math.floor(Math.random()*suffix.length)];
+        for(let i=0; i<100; i++) {
+            let name = syl[Math.floor(Math.random()*syl.length)] + syl[Math.floor(Math.random()*syl.length)] + suffix[Math.floor(Math.random()*suffix.length)];
+            if (!isCityNameTaken(name)) return name;
+        }
+        return syl[Math.floor(Math.random()*syl.length)] + syl[Math.floor(Math.random()*syl.length)] + suffix[Math.floor(Math.random()*suffix.length)] + Math.floor(Math.random()*100);
     }
 
     updateName() {
+        let proposedName = "";
         if (this.isPuppet) {
-            this.name = this.baseName + "傀儡統治機構国";
-            return;
+            proposedName = this.baseName + "傀儡統治機構国";
+        } else {
+            const suffixes = {
+                "絶対王政": "王国",
+                "共和制": "共和国",
+                "帝国": "帝国",
+                "公国": "公国",
+                "連邦制": "連邦",
+                "独裁制": "国",
+                "軍事政権": "国",
+                "革命政府": "革命政府",
+                "臨時政府": "臨時政府",
+                "正統政府": "正統政府"
+            };
+            let suffix = suffixes[this.govType] || "国";
+            
+            if (this.govType === "共和制" && this.regimeNumber > 1) {
+                proposedName = this.baseName + suffix + "第" + this.regimeNumber + "政";
+            } else {
+                proposedName = this.baseName + suffix;
+            }
         }
 
-        const suffixes = {
-            "絶対王政": "王国",
-            "共和制": "共和国",
-            "帝国": "帝国",
-            "公国": "公国",
-            "連邦制": "連邦",
-            "独裁制": "国",
-            "軍事政権": "国",
-            "革命政府": "革命政府",
-            "臨時政府": "臨時政府",
-            "正統政府": "正統政府"
-        };
-        let suffix = suffixes[this.govType] || "国";
-        
-        if (this.govType === "共和制" && this.regimeNumber > 1) {
-            this.name = this.baseName + suffix + "第" + this.regimeNumber + "政";
+        // Ensure uniqueness
+        if (!isNationNameTaken(proposedName, this.id)) {
+            this.name = proposedName;
         } else {
-            this.name = this.baseName + suffix;
+            let counter = 2;
+            let finalName = proposedName;
+            while (true) {
+                let nextName = proposedName + " (" + counter + ")";
+                if (!isNationNameTaken(nextName, this.id)) {
+                    finalName = nextName;
+                    break;
+                }
+                counter++;
+                if (counter > 100) { 
+                    finalName = proposedName + Math.floor(Math.random() * 1000);
+                    break;
+                }
+            }
+            this.name = finalName;
         }
     }
 
@@ -963,6 +1040,7 @@ function handlePolitics(n) {
         const stabChange = Math.floor(Math.random() * 30) - 20; // -20 to +10
         n.stability = clamp(n.stability + stabChange, 0, 100);
         log(`${n.name}の指導者が${oldLeader}から${n.leader}に交代しました。(安定度: ${stabChange > 0 ? "+" : ""}${stabChange})`, "log-info");
+        n.addHistory(`指導者交代: ${oldLeader} -> ${n.leader}`);
     }
 
     // 王政国家向けのランダムイベント (共和派の台頭など)
@@ -1037,6 +1115,7 @@ function handlePolitics(n) {
         n.updateName();
         n.stability = Math.max(0, n.stability - 30);
         log(`${oldName}で政変が発生！ ${oldGov}から${n.govType}へ体制が変わり、${n.name}となりました。`, "log-war");
+        n.addHistory(`政変: ${oldGov} -> ${n.govType} (${oldName} -> ${n.name})`);
     }
 
     // 共和制への移行
@@ -1046,6 +1125,7 @@ function handlePolitics(n) {
         n.regimeNumber++;
         n.updateName();
         log(`${oldName}は近代化に伴い共和制へ移行し、${n.name}となりました。`, "log-peace");
+        n.addHistory(`共和制移行: ${oldName} -> ${n.name}`);
     }
 
     // 平和的独立 (低確率)
@@ -1067,6 +1147,7 @@ function handlePolitics(n) {
         n.govType = newGovs[Math.floor(Math.random() * newGovs.length)];
         n.updateName();
         log(`${oldName}は安定した統治を確立し、${n.name}として国家の正統性を主張し始めました。`, "log-peace");
+        n.addHistory(`正統化: ${oldName} -> ${n.name}`);
     }
 
     // 追い詰められた宗主国による緊急併合 (生存戦略)
@@ -1075,6 +1156,7 @@ function handlePolitics(n) {
         if (myPuppet) {
             // 全土併合
             log(`緊急事態: 追い詰められた${n.name}は、国家存続のために傀儡国である${myPuppet.name}を緊急併合しました！`, "log-war");
+            n.addHistory(`緊急併合: ${myPuppet.name}を併合`);
             
             // タイルの移動
             const puppetTiles = [...myPuppet.tiles];
@@ -1107,7 +1189,26 @@ function grantIndependence(n, city) {
     
     // 都市名を冠した国名
     const prefix = city.name.substring(0, city.name.length - 1); // "市"などを取る
-    newNation.name = prefix + "共和国";
+    let proposedName = prefix + "共和国";
+    
+    // Ensure uniqueness
+    if (isNationNameTaken(proposedName)) {
+        let counter = 2;
+        let finalName = proposedName;
+        while(true) {
+            let nextName = proposedName + " (" + counter + ")";
+            if (!isNationNameTaken(nextName)) {
+                finalName = nextName;
+                break;
+            }
+            counter++;
+            if (counter > 100) break;
+        }
+        newNation.name = finalName;
+    } else {
+        newNation.name = proposedName;
+    }
+
     newNation.govType = "共和国";
     newNation.color = `hsl(${Math.random()*360}, 60%, 60%)`;
     newNation.tech = n.tech;
@@ -1152,6 +1253,8 @@ function grantIndependence(n, city) {
         newNation.relations[n.id] = 50;
         
         log(`平和的独立: ${n.name}から${city.name}が分離し、${newNation.name}として独立しました。`, "log-peace");
+        n.addHistory(`独立承認: ${newNation.name}`);
+        newNation.addHistory(`独立: ${n.name}から分離独立`);
         
         // 安定度少し回復（厄介払いができたため）
         n.stability = Math.min(100, n.stability + 5);
@@ -1184,7 +1287,25 @@ function triggerCityRebellion(n, cities) {
         rebel.govType = type.gov;
         // 都市名を冠した名称にする (最初の都市)
         const prefix = cities[0].name.substring(0, cities[0].name.length - 1);
-        rebel.name = prefix + type.name;
+        let proposedName = prefix + type.name;
+
+        // Ensure uniqueness
+        if (isNationNameTaken(proposedName, rebel.id)) {
+            let counter = 2;
+            let finalName = proposedName;
+            while(true) {
+                let nextName = proposedName + " (" + counter + ")";
+                if (!isNationNameTaken(nextName, rebel.id)) {
+                    finalName = nextName;
+                    break;
+                }
+                counter++;
+                if (counter > 100) break;
+            }
+            rebel.name = finalName;
+        } else {
+            rebel.name = proposedName;
+        }
     }
 
     rebel.rebellionCooldown = 200; // 初期無敵状態
@@ -1230,6 +1351,8 @@ function triggerCityRebellion(n, cities) {
         nations.push(rebel);
         declareWar(n, rebel);
         log(`${n.name}で内戦が発生！ ${cities.map(c => c.name).join('、')}が${rebel.name}として蜂起しました。`, "log-war");
+        n.addHistory(`内戦勃発: ${rebel.name}が蜂起`);
+        rebel.addHistory(`蜂起: ${n.name}に対し反乱を開始`);
         n.stability = Math.max(0, n.stability - 20);
     }
 }
@@ -1307,6 +1430,7 @@ function simulateTick() {
                 // 10年以上経過かつ宗主国の安定度が高い場合
                 if (year - p.puppetSince > 10 && n.stability > 70 && Math.random() < 0.005) {
                     log(`外交併合: ${n.name}は長年の属国である${p.name}を完全に併合しました。`, "log-peace");
+                    n.addHistory(`外交併合: ${p.name}を統合`);
                     
                     // 領土統合
                     const pTiles = [...p.tiles];
@@ -1513,6 +1637,8 @@ function declareWar(n1, n2) {
     if(!n2.atWarWith.includes(n1.id)) n2.atWarWith.push(n1.id);
     worldTension = Math.min(100, worldTension + 5);
     log(`戦争: ${n1.name}が${n2.name}に宣戦布告しました！（緊張度: ${worldTension.toFixed(1)}%）`, "log-war");
+    n1.addHistory(`宣戦布告: 対${n2.name}`);
+    n2.addHistory(`宣戦布告される: ${n1.name}より`);
 
     // 宗主国による防衛
     if (n2.isPuppet && n2.masterId !== -1) {
@@ -1557,6 +1683,8 @@ function concludePeace(n1, n2, type) {
 
     if (type === 'WHITE_PEACE') {
         log(`白紙講和: ${n1.name}と${n2.name}が現状維持で停戦しました。`, "log-peace");
+        n1.addHistory(`白紙講和: ${n2.name}と停戦`);
+        n2.addHistory(`白紙講和: ${n1.name}と停戦`);
     } else if (type === 'PARTIAL_PEACE') {
         // Transfer some cities as a condition
         // 勝者の本国に近い都市を優先的に割譲させる
@@ -1604,6 +1732,8 @@ function concludePeace(n1, n2, type) {
                 }
             });
             log(`途中講和: ${loser.name}が領土を割譲し、${winner.name}と和平しました。`, "log-peace");
+            winner.addHistory(`講和(勝利): ${loser.name}より領土獲得`);
+            loser.addHistory(`講和(敗北): ${winner.name}へ領土割譲`);
         } else {
             log(`和平: ${n1.name}と${n2.name}が停戦合意しました。`, "log-peace");
         }
@@ -1671,6 +1801,8 @@ function concludePeace(n1, n2, type) {
                 }
             }
             log(`国境割譲: ${loser.name}は国境地帯を${winner.name}に割譲しました。`, "log-peace");
+            winner.addHistory(`講和(勝利): ${loser.name}より国境地帯を獲得`);
+            loser.addHistory(`講和(敗北): ${winner.name}へ国境地帯を割譲`);
         } else {
              log(`和平: ${n1.name}と${n2.name}が停戦合意しました。`, "log-peace");
         }
@@ -1760,6 +1892,8 @@ function concludePeace(n1, n2, type) {
         });
 
         log(`戦後処理: ${loser.name}は${winner.name}の傀儡国となりました。`, "log-war");
+        winner.addHistory(`講和(完全勝利): ${loser.name}を傀儡化`);
+        loser.addHistory(`講和(完全敗北): ${winner.name}の傀儡となる`);
     } else {
         log(`和平: ${n1.name}と${n2.name}が停戦合意しました。`, "log-peace");
     }
