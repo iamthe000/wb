@@ -808,17 +808,23 @@ function renderMap() {
         });
 
         // 国名の描画 (HOI4スタイル)
-        ctx.font = 'bold 12px "Segoe UI", Roboto, "Helvetica Neue", sans-serif';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         nations.forEach(n => {
             if (!n.isDead && n.tiles.length > 40) {
+                // mapScaleが小さい（ズームアウトしている）ほど、フォントサイズを大きくして視認性を維持
+                const baseSize = 12 / mapScale;
+                const sizeBonus = Math.min(10 / mapScale, (n.tiles.length / 800) / mapScale);
+                const fontSize = baseSize + sizeBonus;
+                
+                ctx.font = `bold ${fontSize}px "Segoe UI", Roboto, "Helvetica Neue", sans-serif`;
+
                 const drawX = offsetX + n.centroid.x * TILE_SIZE;
                 const drawY = offsetY + n.centroid.y * TILE_SIZE;
                 
                 // 文字の縁取り
                 ctx.strokeStyle = "rgba(0,0,0,0.8)";
-                ctx.lineWidth = 3;
+                ctx.lineWidth = Math.max(2 / mapScale, 2);
                 ctx.strokeText(n.name, drawX, drawY);
                 
                 // 文字本体
