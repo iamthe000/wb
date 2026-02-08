@@ -261,8 +261,13 @@ window.onload = () => {
     resizeCanvas();
     window.addEventListener('resize', resizeCanvas);
 
-    // グリッド初期化 (中サイズデフォルト)
-    initGrid(128);
+    // グリッド初期化 (画面サイズに応じてデフォルト設定)
+    let defaultSize = 128;
+    if (window.innerWidth <= 768) {
+        defaultSize = 64; // スマホなどは小サイズ
+    }
+    document.getElementById('mapSize').value = defaultSize;
+    initGrid(defaultSize);
 
     // イベントリスナー
     setupInput();
