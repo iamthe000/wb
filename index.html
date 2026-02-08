@@ -505,6 +505,8 @@ class Nation {
         this.isRebel = false;
         this.parentName = "";
         this.rebellionCooldown = 0;
+        this.isPuppet = false;
+        this.masterId = -1;
         
         this.cities = [];
 
@@ -532,6 +534,11 @@ class Nation {
     }
 
     updateName() {
+        if (this.isPuppet) {
+            this.name = this.baseName + "傀儡統治機構国";
+            return;
+        }
+
         const suffixes = {
             "絶対王政": "王国",
             "共和制": "共和国",
@@ -1132,6 +1139,8 @@ function simulateTick() {
         // 戦争判定 (閾値を下げ、好戦的に)
         if (n.relations[target.id] < -50 && neighbor) {
             if (!n.atWarWith.includes(target.id)) {
+                // 傀儡国は主人に逆らわない
+                if (n.isPuppet && n.masterId === target.id) return;
                 declareWar(n, target);
             }
         }
@@ -1139,6 +1148,8 @@ function simulateTick() {
         // 野心による開戦 (圧倒的有利な場合)
         if (neighbor && n.getMilitaryPower() > target.getMilitaryPower() * 2 && Math.random() < 0.05) {
             if (!n.atWarWith.includes(target.id)) {
+                // 傀儡国は主人に逆らわない
+                if (n.isPuppet && n.masterId === target.id) return;
                 log(`野心: ${n.name}は${target.name}への領土拡大の好機を見出しました！`, "log-war");
                 declareWar(n, target);
             }
@@ -1150,15 +1161,34 @@ function simulateTick() {
             
             // 地形による和平確率の上昇 (山や川が境界だと膠着しやすい)
             const comp = getBoundaryComposition(n, target);
+            let roughTerrainRatio = 0;
             if (comp.total > 0) {
-                const roughTerrainRatio = (comp.mountain + comp.river) / comp.total;
+                roughTerrainRatio = (comp.mountain + comp.river) / comp.total;
                 if (roughTerrainRatio > 0.4) {
                     peaceChance += 0.05; // 境界の40%以上が険しい地形で和平しやすくなる
                 }
             }
 
             if (Math.random() < peaceChance) {
-                makePeace(n, target);
+                // 終戦形式の決定
+                const nPow = n.getMilitaryPower();
+                const tPow = target.getMilitaryPower();
+                const ratio = nPow / tPow;
+
+                if (ratio > 5 || ratio < 0.2) {
+                    // 一方が圧倒的
+                    const loser = ratio > 5 ? target : n;
+                    if (loser.stability < 40 || loser.cities.length <= 2) {
+                        concludePeace(n, target, 'PUPPET');
+                    } else {
+                        concludePeace(n, target, 'PARTIAL_PEACE');
+                    }
+                } else if (roughTerrainRatio > 0.6) {
+                    // 地形による膠着
+                    concludePeace(n, target, 'WHITE_PEACE');
+                } else {
+                    concludePeace(n, target, 'DEFAULT');
+                }
             }
         }
     });
@@ -1251,12 +1281,87 @@ function declareWar(n1, n2) {
     if(!n2.atWarWith.includes(n1.id)) n2.atWarWith.push(n1.id);
     worldTension = Math.min(100, worldTension + 5);
     log(`戦争: ${n1.name}が${n2.name}に宣戦布告しました！（緊張度: ${worldTension.toFixed(1)}%）`, "log-war");
+
+    // 傀儡国も参戦
+    nations.forEach(puppet => {
+        if (puppet.isPuppet && puppet.masterId === n1.id && !puppet.isDead) {
+            if (!puppet.atWarWith.includes(n2.id)) {
+                puppet.atWarWith.push(n2.id);
+                if (!n2.atWarWith.includes(puppet.id)) n2.atWarWith.push(puppet.id);
+                log(`${n1.name}の傀儡国、${puppet.name}が参戦しました。`, "log-war");
+            }
+        }
+        if (puppet.isPuppet && puppet.masterId === n2.id && !puppet.isDead) {
+            if (!puppet.atWarWith.includes(n1.id)) {
+                puppet.atWarWith.push(n1.id);
+                if (!n1.atWarWith.includes(puppet.id)) n1.atWarWith.push(puppet.id);
+                log(`${n2.name}の傀儡国、${puppet.name}が参戦しました。`, "log-war");
+            }
+        }
+    });
+}
+
+function concludePeace(n1, n2, type) {
+    // Determine winner/loser if applicable
+    let winner = n1, loser = n2;
+    if (n2.getMilitaryPower() > n1.getMilitaryPower()) {
+        winner = n2;
+        loser = n1;
+    }
+
+    n1.atWarWith = n1.atWarWith.filter(id => id !== n2.id);
+    n2.atWarWith = n2.atWarWith.filter(id => id !== n1.id);
+
+    if (type === 'WHITE_PEACE') {
+        log(`白紙講和: ${n1.name}と${n2.name}が現状維持で停戦しました。`, "log-peace");
+    } else if (type === 'PARTIAL_PEACE') {
+        // Transfer some cities as a condition
+        const numCitiesToTransfer = Math.min(loser.cities.length - 1, 2);
+        if (numCitiesToTransfer > 0) {
+            for(let i=0; i<numCitiesToTransfer; i++) {
+                const city = loser.cities.pop();
+                if (city) {
+                    city.nationId = winner.id;
+                    winner.cities.push(city);
+                    // Also transfer surrounding tiles
+                    const cx = city.tileIdx % width;
+                    const cy = Math.floor(city.tileIdx / width);
+                    const radius = 5;
+                    for (let dy = -radius; dy <= radius; dy++) {
+                        for (let dx = -radius; dx <= radius; dx++) {
+                            const nx = cx + dx;
+                            const ny = cy + dy;
+                            if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
+                                const idx = ny * width + nx;
+                                if (ownerGrid[idx] === loser.id) {
+                                    ownerGrid[idx] = winner.id;
+                                    winner.tiles.push(idx);
+                                    loser.tiles = loser.tiles.filter(t => t !== idx);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            log(`途中講和: ${loser.name}が領土を割譲し、${winner.name}と和平しました。`, "log-peace");
+        } else {
+            log(`和平: ${n1.name}と${n2.name}が停戦合意しました。`, "log-peace");
+        }
+    } else if (type === 'PUPPET') {
+        loser.isPuppet = true;
+        loser.masterId = winner.id;
+        loser.updateName();
+        loser.stability = 50;
+        winner.relations[loser.id] = 100;
+        loser.relations[winner.id] = 100;
+        log(`戦後処理: ${loser.name}は${winner.name}の傀儡国となりました。`, "log-war");
+    } else {
+        log(`和平: ${n1.name}と${n2.name}が停戦合意しました。`, "log-peace");
+    }
 }
 
 function makePeace(n1, n2) {
-    n1.atWarWith = n1.atWarWith.filter(id => id !== n2.id);
-    n2.atWarWith = n2.atWarWith.filter(id => id !== n1.id);
-    log(`和平: ${n1.name}と${n2.name}が停戦合意しました。`, "log-peace");
+    concludePeace(n1, n2, 'DEFAULT');
 }
 
 function battle(attacker, defender) {
