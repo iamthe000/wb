@@ -688,21 +688,53 @@ class Nation {
         if (!isNationNameTaken(proposedName, this.id)) {
             this.name = proposedName;
         } else {
-            let counter = 2;
-            let finalName = proposedName;
-            while (true) {
-                let nextName = proposedName + " (" + counter + ")";
-                if (!isNationNameTaken(nextName, this.id)) {
-                    finalName = nextName;
-                    break;
+            // Check if we should use "Nth Regime" numbering
+            const isDemocracy = ["多党民主制", "二大政党民主制", "共和制"].includes(this.govType);
+            
+            if (isDemocracy) {
+                let baseString = proposedName;
+                let startNum = 2;
+                
+                // Check if already ends in "第N政"
+                const match = proposedName.match(/第(\d+)政$/);
+                if (match) {
+                    baseString = proposedName.substring(0, match.index);
+                    startNum = parseInt(match[1]) + 1;
                 }
-                counter++;
-                if (counter > 100) { 
-                    finalName = proposedName + Math.floor(Math.random() * 1000);
-                    break;
+
+                let finalName = proposedName;
+                let counter = startNum;
+                
+                while (true) {
+                    let nextName = baseString + "第" + counter + "政";
+                    if (!isNationNameTaken(nextName, this.id)) {
+                        finalName = nextName;
+                        break;
+                    }
+                    counter++;
+                    if (counter > 1000) {
+                        finalName = proposedName + Math.floor(Math.random() * 1000);
+                        break;
+                    }
                 }
+                this.name = finalName;
+            } else {
+                let counter = 2;
+                let finalName = proposedName;
+                while (true) {
+                    let nextName = proposedName + " (" + counter + ")";
+                    if (!isNationNameTaken(nextName, this.id)) {
+                        finalName = nextName;
+                        break;
+                    }
+                    counter++;
+                    if (counter > 100) { 
+                        finalName = proposedName + Math.floor(Math.random() * 1000);
+                        break;
+                    }
+                }
+                this.name = finalName;
             }
-            this.name = finalName;
         }
 
         if (!this.isPuppet) {
@@ -1216,10 +1248,11 @@ function grantIndependence(n, city) {
     
     // Ensure uniqueness
     if (isNationNameTaken(proposedName)) {
+        // proposedName is always "XXX共和国" here, so we use Nth regime format
         let counter = 2;
         let finalName = proposedName;
         while(true) {
-            let nextName = proposedName + " (" + counter + ")";
+            let nextName = proposedName + "第" + counter + "政";
             if (!isNationNameTaken(nextName)) {
                 finalName = nextName;
                 break;
