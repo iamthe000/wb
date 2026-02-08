@@ -7,7 +7,11 @@
     <style>
         body { margin: 0; overflow: hidden; background: #0c0c0c; color: #e0e0e0; font-family: 'Segoe UI', 'Roboto', sans-serif; }
         #container { display: flex; height: 100vh; }
-        #canvas-container { flex: 1; position: relative; cursor: crosshair; background: #000; }
+        #canvas-container { flex: 1; display: flex; flex-direction: column; background: #000; }
+        #top-ui-bar { height: 50px; background: #1a1a1a; display: flex; align-items: center; justify-content: space-between; padding: 0 20px; border-bottom: 1px solid #333; z-index: 10; flex-shrink: 0; }
+        #top-ui-bar .ui-group { display: flex; align-items: center; gap: 10px; font-size: 0.9em; }
+        #top-ui-bar .ui-label { color: #aaa; margin-right: 5px; }
+        #canvas-wrapper { flex: 1; position: relative; overflow: hidden; cursor: crosshair; }
         canvas { display: block; image-rendering: pixelated; }
         #sidebar { width: 320px; background: #1a1a1a; padding: 20px; overflow-y: auto; box-shadow: -2px 0 10px rgba(0,0,0,0.8); display: flex; flex-direction: column; gap: 15px; border-left: 1px solid #333; }
 
@@ -35,11 +39,6 @@
         
         /* Tooltip style overlay */
         #hover-info { position: absolute; background: rgba(0,0,0,0.8); padding: 5px; pointer-events: none; border-radius: 4px; display: none; font-size: 0.8em; z-index: 10; border: 1px solid #666; }
-        
-        /* Map Controls Overlay */
-        #map-controls { position: absolute; top: 10px; right: 10px; background: rgba(0,0,0,0.7); padding: 10px; border-radius: 5px; border: 1px solid #555; z-index: 20; display: flex; flex-direction: column; gap: 5px; color: #e0e0e0; width: 150px; }
-        #map-controls .control-row { display: flex; justify-content: space-between; align-items: center; font-size: 0.9em; }
-        #map-controls button { margin-top: 5px; width: 100%; padding: 5px; font-size: 0.9em; }
     </style>
 <link rel="apple-touch-icon" href="icon192x192.png">
 <link rel="icon" href="icon192x192.png">
@@ -110,14 +109,20 @@ if ('serviceWorker' in navigator) {
 
 <div id="container">
     <div id="canvas-container">
-        <canvas id="gameCanvas"></canvas>
-        <div id="hover-info"></div>
-        <div id="map-controls">
-            <div class="control-row">
-                <span>速度:</span>
-                <input type="range" id="simSpeed" min="1" max="10" value="5" style="width:100px;">
+        <div id="top-ui-bar">
+            <div class="ui-group">
+                <span class="ui-label">年:</span> <span id="top-ui-year" style="font-weight:bold; color:#fff;">1</span>
+                <span class="ui-label" style="margin-left: 15px;">世界緊張度:</span> <span id="top-ui-tension" style="font-weight:bold; color:#4db8ff;">0.0%</span>
             </div>
-            <button id="btn-pause">一時停止 / 再開</button>
+            <div class="ui-group">
+                <span style="font-size:0.9em;">速度:</span>
+                <input type="range" id="simSpeed" min="1" max="10" value="5" style="width:100px;">
+                <button id="btn-pause" style="width: auto; padding: 5px 10px; margin-top: 0; margin-left: 10px;">一時停止 / 再開</button>
+            </div>
+        </div>
+        <div id="canvas-wrapper">
+            <canvas id="gameCanvas"></canvas>
+            <div id="hover-info"></div>
         </div>
     </div>
     
@@ -374,7 +379,7 @@ window.onload = () => {
 };
 
 function resizeCanvas() {
-    const container = document.getElementById('canvas-container');
+    const container = document.getElementById('canvas-wrapper');
     canvas.width = container.clientWidth;
     canvas.height = container.clientHeight;
 }
@@ -1104,6 +1109,13 @@ function loop() {
             document.getElementById('info-year').innerText = year;
             document.getElementById('info-tension').innerText = worldTension.toFixed(1) + "%";
             document.getElementById('info-tension').style.color = `rgb(${worldTension*2.55}, ${255 - worldTension*2.55}, 0)`;
+            
+            // Top Bar Updates
+            document.getElementById('top-ui-year').innerText = year;
+            const tVal = worldTension.toFixed(1);
+            const tEl = document.getElementById('top-ui-tension');
+            tEl.innerText = tVal + "%";
+            tEl.style.color = worldTension > 50 ? "#ff6b6b" : "#4db8ff";
         }
     }
 
@@ -1271,22 +1283,6 @@ function renderMap() {
 
     ctx.restore();
 
-    // HUD (Year / Tension)
-    if (!isDrawing) {
-        ctx.fillStyle = "rgba(0,0,0,0.5)";
-        ctx.fillRect(10, 10, 120, 50);
-        ctx.strokeStyle = "#4db8ff";
-        ctx.lineWidth = 1;
-        ctx.strokeRect(10, 10, 120, 50);
-
-        ctx.fillStyle = "#fff";
-        ctx.font = "bold 14px monospace";
-        ctx.textAlign = "left";
-        ctx.textBaseline = 'middle';
-        ctx.fillText(`YEAR: ${year}`, 20, 25);
-        ctx.fillStyle = worldTension > 50 ? "#ff6b6b" : "#4db8ff";
-        ctx.fillText(`WT: ${worldTension.toFixed(1)}%`, 20, 45);
-    }
 }
 
 function handlePolitics(n) {
