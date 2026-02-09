@@ -1529,8 +1529,13 @@ function handlePolitics(n) {
         n.addHistory(`指導者交代: ${oldLeader} -> ${n.leader}`);
 
         // Grand Empire Succession Crisis
-        if (n.isGrandEmpire && n.cities.length >= 2 && Math.random() < 0.8) {
-            triggerSuccessionCivilWar(n);
+        if (n.isGrandEmpire) {
+            // 大帝国の崩壊 (高確率で群雄割拠へ)
+            if (Math.random() < 0.9) {
+                triggerImperialCollapse(n);
+            } else if (n.cities.length >= 2 && Math.random() < 0.8) {
+                triggerSuccessionCivilWar(n);
+            }
         }
     }
 
@@ -2076,6 +2081,156 @@ function getDistSq(idx1, idx2) {
     const x2 = idx2 % width;
     const y2 = Math.floor(idx2 / width);
     return (x1-x2)**2 + (y1-y2)**2;
+}
+
+function triggerImperialCollapse(n) {
+    if (n.tiles.length < 5) return; 
+
+    log(`崩壊: 指導者の死をきっかけに、大帝国${n.name}は制御を失い、群雄割拠の時代へと突入しました！`, "log-war");
+    n.addHistory(`滅亡: 指導者交代に伴う国家崩壊`);
+
+    // Determine split centers
+    let centers = [];
+    
+    // Use existing cities as priority centers
+    n.cities.forEach(c => {
+        centers.push({ type: 'city', obj: c, tile: c.tileIdx });
+    });
+
+    // If too few cities, add random tiles
+    const targetSplits = Math.max(4, Math.ceil(n.tiles.length / 30)); 
+    
+    let attempts = 0;
+    while (centers.length < targetSplits && attempts < 100) {
+        const t = n.tiles[Math.floor(Math.random() * n.tiles.length)];
+        let tooClose = false;
+        const cx = t % width; 
+        const cy = Math.floor(t / width);
+        
+        for (let c of centers) {
+            const ox = c.tile % width;
+            const oy = Math.floor(c.tile / width);
+            if ((cx-ox)**2 + (cy-oy)**2 < 50) { 
+                tooClose = true;
+                break;
+            }
+        }
+        
+        if (!tooClose) {
+            centers.push({ type: 'tile', obj: null, tile: t });
+        }
+        attempts++;
+    }
+
+    // Create new nations for each center
+    const warlords = [];
+    centers.forEach((center, idx) => {
+        const w = new Nation();
+        w.tech = n.tech;
+        w.religion = n.religion;
+        w.ecoIdeology = n.ecoIdeology;
+        
+        const sys = generatePoliticalSystem(n.tech);
+        w.sysBroad = sys.sysBroad;
+        w.sysDetailed = sys.sysDetailed;
+        w.govType = w.sysDetailed;
+        w.sovereign = sys.sovereign;
+        
+        // Name generation
+        if (center.type === 'city') {
+            const city = center.obj;
+            // Remove suffixes like 市, 府, etc
+            const prefix = city.name.replace(/[市府京都港要塞]+$/, "");
+            w.baseName = prefix;
+        } else {
+             w.baseName = w.generateBaseName();
+        }
+        w.updateName();
+
+        w.color = `hsl(${Math.random()*360}, 70%, 50%)`;
+        w.relations = {};
+        
+        // Assign center city if exists
+        if (center.type === 'city') {
+            const city = center.obj;
+            city.nationId = w.id;
+            w.cities.push(city);
+        } else {
+             const cityName = w.generateCityName();
+             const city = new City(cityName, center.tile, w.id);
+             w.cities.push(city);
+        }
+        
+        warlords.push(w);
+        nations.push(w);
+    });
+    
+    // Clear parent cities list as they are reassigned
+    n.cities = [];
+
+    // Voronoi Assignment
+    const oldTiles = [...n.tiles];
+    n.tiles = [];
+    
+    oldTiles.forEach(tIdx => {
+        const tx = tIdx % width;
+        const ty = Math.floor(tIdx / width);
+        
+        let bestWarlord = null;
+        let minDist = Infinity;
+        
+        warlords.forEach((w, wIdx) => {
+            const centerTile = centers[wIdx].tile;
+            const cx = centerTile % width;
+            const cy = Math.floor(centerTile / width);
+            const dist = (tx-cx)**2 + (ty-cy)**2;
+            
+            if (dist < minDist) {
+                minDist = dist;
+                bestWarlord = w;
+            }
+        });
+        
+        if (bestWarlord) {
+            ownerGrid[tIdx] = bestWarlord.id;
+            bestWarlord.tiles.push(tIdx);
+        }
+    });
+
+    // Distribute Stats & Finalize
+    const totalNewTiles = warlords.reduce((sum, w) => sum + w.tiles.length, 0);
+    
+    warlords.forEach(w => {
+        if (w.tiles.length === 0) {
+            w.isDead = true;
+            return;
+        }
+        
+        const ratio = w.tiles.length / totalNewTiles;
+        
+        w.pop = Math.floor(n.pop * ratio);
+        w.gdp = Math.floor(n.gdp * ratio);
+        w.soldiers = Math.floor(n.soldiers * ratio); 
+        w.tanks = Math.floor(n.tanks * ratio);
+        w.ships = Math.floor(n.ships * ratio);
+        
+        w.updateCentroid();
+        
+        warlords.forEach(other => {
+            if (w !== other) {
+                w.relations[other.id] = -100;
+                w.atWarWith.push(other.id);
+                if (!other.atWarWith.includes(w.id)) other.atWarWith.push(w.id);
+            }
+        });
+        
+        w.stability = 40 + Math.random() * 20; 
+        w.addHistory(`建国: ${n.name}の崩壊により成立`);
+    });
+
+    n.isDead = true;
+    n.pop = 0;
+    n.soldiers = 0;
 }
 
 function simulateTick() {
