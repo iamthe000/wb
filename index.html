@@ -151,7 +151,7 @@ if ('serviceWorker' in navigator) {
     </div>
     
     <div id="sidebar">
-        <h1>TERL-テリル 世界シュミレーター</h1>
+        <h1>TERL-テリル 世界シミュレーター</h1>
         
         <div id="menu-panel" class="panel">
             <h2>1. マップデザイン</h2>
@@ -944,11 +944,10 @@ class Nation {
             this.sovereign = '君主';
             this.govType = this.sysDetailed;
             
-            // Boost stats
-            this.pop = Math.floor(this.pop * 1.5);
-            this.gdp = Math.floor(this.gdp * 2.0);
-            this.soldiers = Math.floor(this.soldiers * 2.0);
-            this.soldierQuality += 0.5;
+            // Boost stats (Monster Buff)
+            this.pop = Math.floor(this.pop * 5.0);
+            this.gdp = Math.floor(this.gdp * 10.0);
+            this.tech = 3; // Modern
             this.color = `hsl(${Math.random()*360}, 100%, 30%)`; // Darker, more intense color
         }
 
@@ -959,11 +958,12 @@ class Nation {
         this.leader = this.generateLeaderName();
         
         // Military
-        this.soldiers = Math.floor(this.pop * 0.1);
-        this.soldierQuality = 0.5 + Math.random(); // 0.5 - 1.5
+        const soldierRatio = this.isGrandEmpire ? 0.5 : 0.1;
+        this.soldiers = Math.floor(this.pop * soldierRatio);
+        this.soldierQuality = (0.5 + Math.random()) + (this.isGrandEmpire ? 2.0 : 0);
         this.equipQuality = 0.5 + Math.random();
-        this.tanks = 0;
-        this.ships = 0;
+        this.tanks = this.isGrandEmpire ? 100 : 0;
+        this.ships = this.isGrandEmpire ? 50 : 0;
         
         // Diplomacy
         this.relations = {}; // { nationId: value (-100 to 100) }
@@ -1145,7 +1145,9 @@ class Nation {
     getMilitaryPower() {
         // 軍事力計算式: 兵数 * 質 * 装備 * (戦車ボーナス)
         let tankBonus = 1 + (this.tanks * 0.05);
-        return this.soldiers * this.soldierQuality * this.equipQuality * tankBonus * (1 + this.tech * 0.5);
+        let base = this.soldiers * this.soldierQuality * this.equipQuality * tankBonus * (1 + this.tech * 0.5);
+        if (this.isGrandEmpire) base *= 5.0; // Monster buff
+        return base;
     }
 
     getNavalPower() {
