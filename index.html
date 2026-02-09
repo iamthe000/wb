@@ -55,6 +55,8 @@
         .ranking-table th { background: #333; color: #ccc; }
         .ranking-table tr:nth-child(even) { background: #2a2a2a; }
         .ranking-section-title { margin: 15px 0 5px 0; color: #4db8ff; border-bottom: 1px solid #555; padding-bottom: 2px; }
+        .rank-bar-container { background: #444; width: 100%; height: 10px; border-radius: 5px; overflow: hidden; }
+        .rank-bar { height: 100%; transition: width 0.5s; }
     </style>
 <link rel="apple-touch-icon" href="icon192x192.png">
 <link rel="icon" href="icon192x192.png">
@@ -535,21 +537,29 @@ function openRankingModal() {
         
         // Header
         const thead = document.createElement('thead');
-        thead.innerHTML = `<tr><th style="width:30px">#</th><th>国家名</th><th style="text-align:right;">${title.split(' ')[0]}</th></tr>`;
+        thead.innerHTML = `<tr><th style="width:30px">#</th><th>国家名</th><th style="width: 40%;"></th><th style="text-align:right;">${title.split(' ')[0]}</th></tr>`;
         table.appendChild(thead);
         
         // Body
         const tbody = document.createElement('tbody');
-        // Filter dead nations and sort
         const activeNations = nations.filter(n => !n.isDead);
-        const sorted = activeNations.sort((a, b) => valueFn(b) - valueFn(a)).slice(0, 10); // Top 10
+        const sorted = activeNations.sort((a, b) => valueFn(b) - valueFn(a)).slice(0, 10);
         
+        const maxVal = sorted.length > 0 ? valueFn(sorted[0]) : 1;
+
         sorted.forEach((n, index) => {
             const tr = document.createElement('tr');
+            const val = valueFn(n);
+            const percent = (val / maxVal) * 100;
             tr.innerHTML = `
                 <td>${index + 1}</td>
                 <td style="color:${n.color}; font-weight:bold;">${n.name}</td>
-                <td style="text-align:right;">${formatFn ? formatFn(valueFn(n)) : valueFn(n)}</td>
+                <td>
+                    <div class="rank-bar-container">
+                        <div class="rank-bar" style="width: ${percent}%; background-color: ${n.color};"></div>
+                    </div>
+                </td>
+                <td style="text-align:right;">${formatFn ? formatFn(val) : val}</td>
             `;
             tbody.appendChild(tr);
         });
@@ -557,6 +567,9 @@ function openRankingModal() {
         section.appendChild(table);
         return section;
     };
+
+    // 0. Total Score (Hegemon check)
+    content.appendChild(createTable('総合国力スコア', nations, n => Math.floor(n.gdp + (n.pop / 100) + (n.getMilitaryPower() * 10) + (n.tiles.length * 50)), val => formatNum(val)));
 
     // 1. GDP
     content.appendChild(createTable('GDP (経済力)', nations, n => n.gdp, val => formatNum(val)));
@@ -1949,13 +1962,17 @@ function simulateTick() {
 
     // 2. 外交フェーズ
     hegemonId = -1;
-    if (totalLandTiles > 0) {
-        nations.forEach(n => {
-            if (!n.isDead && n.tiles.length / totalLandTiles > 0.666) {
+    let maxScore = -1;
+    nations.forEach(n => {
+        if (!n.isDead) {
+            // Score = GDP + (Pop/100) + (Mil*10) + (Tiles*50)
+            const score = n.gdp + (n.pop / 100) + (n.getMilitaryPower() * 10) + (n.tiles.length * 50);
+            if (score > maxScore) {
+                maxScore = score;
                 hegemonId = n.id;
             }
-        });
-    }
+        }
+    });
 
     nations.forEach(n => {
         if (n.isDead) return;
