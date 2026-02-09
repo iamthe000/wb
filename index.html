@@ -527,7 +527,16 @@ function setupInput() {
 }
 
 function openRankingModal() {
+    document.getElementById('ranking-modal').style.display = 'block';
+    renderRankingContent();
+}
+
+function renderRankingContent() {
     const content = document.getElementById('ranking-content');
+    // Save scroll position
+    const modal = document.getElementById('ranking-modal');
+    const scrollTop = modal ? modal.scrollTop : 0;
+
     content.innerHTML = '';
 
     // Prepare Ranking Data (Aggregate Puppets)
@@ -627,7 +636,8 @@ function openRankingModal() {
     // 4. Territory (Tiles)
     content.appendChild(createTable('領土面積 (タイル数)', rankingData, d => d.tiles, val => val));
 
-    document.getElementById('ranking-modal').style.display = 'block';
+    // Restore scroll position
+    if (modal) modal.scrollTop = scrollTop;
 }
 
 /**
@@ -1291,6 +1301,11 @@ function loop() {
                 hEl.innerText = "なし";
                 hEl.style.color = "#ccc";
             }
+
+            // Real-time Ranking Update
+            if (document.getElementById('ranking-modal').style.display === 'block') {
+                renderRankingContent();
+            }
         }
     }
 
@@ -1567,9 +1582,12 @@ function handlePolitics(n) {
     let rebellingCities = [];
     if (n.rebellionCooldown === 0 && n.cities.length > 0) {
         n.cities.forEach(city => {
-            // 共和制(民主主義)の国は反乱確率を下げる (0.005 -> 0.002)
-            let rebelChance = (n.sysBroad === '民主主義') ? 0.002 : 0.005;
-            if (city.unrest > 75 && Math.random() < rebelChance) {
+            // 共和制(民主主義)の国は反乱確率を極端に下げる (0.005 -> 0.00005)
+            // また、必要な不満度も引き上げる (75 -> 90)
+            let rebelChance = (n.sysBroad === '民主主義') ? 0.00005 : 0.005;
+            let unrestThreshold = (n.sysBroad === '民主主義') ? 90 : 75;
+
+            if (city.unrest > unrestThreshold && Math.random() < rebelChance) {
                 rebellingCities.push(city);
             }
         });
