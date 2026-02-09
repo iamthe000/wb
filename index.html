@@ -1591,7 +1591,10 @@ function handlePolitics(n) {
     }
 
     // 政変の判定
-    if (n.stability < 50 && Math.random() < 0.002) {
+    const coupThreshold = (n.sysBroad === '民主主義') ? 40 : 50; // 民主制は崩壊しにくい
+    const coupChance = (n.sysBroad === '民主主義') ? 0.0005 : 0.002;
+
+    if (n.stability < coupThreshold && Math.random() < coupChance) {
         const oldName = n.name;
         const oldGov = n.sysDetailed;
         
