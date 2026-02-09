@@ -880,6 +880,23 @@ class Nation {
         
         this.govType = this.sysDetailed; // Backward compatibility
 
+        // Grand Empire Logic (Rare Spawn)
+        this.isGrandEmpire = false;
+        if (Math.random() < 0.05) {
+            this.isGrandEmpire = true;
+            this.sysBroad = '権威主義';
+            this.sysDetailed = '絶対君主制';
+            this.sovereign = '君主';
+            this.govType = this.sysDetailed;
+            
+            // Boost stats
+            this.pop = Math.floor(this.pop * 1.5);
+            this.gdp = Math.floor(this.gdp * 2.0);
+            this.soldiers = Math.floor(this.soldiers * 2.0);
+            this.soldierQuality += 0.5;
+            this.color = `hsl(${Math.random()*360}, 100%, 30%)`; // Darker, more intense color
+        }
+
         this.updateName();
         this.stability = 100;
         this.unrest = 0;
@@ -957,36 +974,40 @@ class Nation {
                 proposedName = this.baseName + "傀儡統治機構国";
             }
         } else {
-            let suffix = "国";
-
-            // Suffix logic based on detailed political system
-            if (this.sysDetailed.includes('君主') || this.sovereign === '君主') {
-                if (this.sysDetailed === '帝国' || (this.id % 5 === 0)) suffix = "帝国";
-                else suffix = "王国";
-                if (this.sysDetailed === '公国') suffix = "公国";
-            } else if (this.sysDetailed.includes('軍事') || this.sovereign === '軍部') {
-                suffix = "軍事政権";
-            } else if (this.sysDetailed.includes('神権') || this.sovereign === '宗教指導者') {
-                suffix = "神聖国";
-            } else if (this.sysBroad === '民主主義') {
-                suffix = "共和国";
-                if (this.stateStruct === '連邦国家') suffix = "連邦" + suffix;
-                if (this.stateStruct === '国家連合') suffix = "連合";
-                if (this.sysDetailed === '大統領制' && this.stateStruct === '連邦国家') suffix = "合衆国"; // Flavor override
-            } else if (this.sysBroad === '全体主義') {
-                if (this.ecoIdeology.includes('計画') || this.ecoIdeology.includes('統制')) suffix = "社会主義共和国";
-                else suffix = "独裁国";
-            }
-            
-            // Special cases
-            if (this.sysDetailed === "革命政府") suffix = "革命政府";
-            if (this.sysDetailed === "臨時政府") suffix = "臨時政府";
-            if (this.sysDetailed === "正統政府") suffix = "正統政府";
-
-            if (this.sysBroad === '民主主義' && this.regimeNumber > 1) {
-                proposedName = this.baseName + suffix + "第" + this.regimeNumber + "政";
+            if (this.isGrandEmpire) {
+                proposedName = "大" + this.baseName + "帝国";
             } else {
-                proposedName = this.baseName + suffix;
+                let suffix = "国";
+
+                // Suffix logic based on detailed political system
+                if (this.sysDetailed.includes('君主') || this.sovereign === '君主') {
+                    if (this.sysDetailed === '帝国' || (this.id % 5 === 0)) suffix = "帝国";
+                    else suffix = "王国";
+                    if (this.sysDetailed === '公国') suffix = "公国";
+                } else if (this.sysDetailed.includes('軍事') || this.sovereign === '軍部') {
+                    suffix = "軍事政権";
+                } else if (this.sysDetailed.includes('神権') || this.sovereign === '宗教指導者') {
+                    suffix = "神聖国";
+                } else if (this.sysBroad === '民主主義') {
+                    suffix = "共和国";
+                    if (this.stateStruct === '連邦国家') suffix = "連邦" + suffix;
+                    if (this.stateStruct === '国家連合') suffix = "連合";
+                    if (this.sysDetailed === '大統領制' && this.stateStruct === '連邦国家') suffix = "合衆国"; // Flavor override
+                } else if (this.sysBroad === '全体主義') {
+                    if (this.ecoIdeology.includes('計画') || this.ecoIdeology.includes('統制')) suffix = "社会主義共和国";
+                    else suffix = "独裁国";
+                }
+                
+                // Special cases
+                if (this.sysDetailed === "革命政府") suffix = "革命政府";
+                if (this.sysDetailed === "臨時政府") suffix = "臨時政府";
+                if (this.sysDetailed === "正統政府") suffix = "正統政府";
+
+                if (this.sysBroad === '民主主義' && this.regimeNumber > 1) {
+                    proposedName = this.baseName + suffix + "第" + this.regimeNumber + "政";
+                } else {
+                    proposedName = this.baseName + suffix;
+                }
             }
         }
 
@@ -1440,6 +1461,11 @@ function handlePolitics(n) {
         n.stability = clamp(n.stability + stabChange, 0, 100);
         log(`${n.name}の指導者が${oldLeader}から${n.leader}に交代しました。(安定度: ${stabChange > 0 ? "+" : ""}${stabChange})`, "log-info");
         n.addHistory(`指導者交代: ${oldLeader} -> ${n.leader}`);
+
+        // Grand Empire Succession Crisis
+        if (n.isGrandEmpire && n.cities.length >= 2 && Math.random() < 0.8) {
+            triggerSuccessionCivilWar(n);
+        }
     }
 
     // 王政国家向けのランダムイベント (共和派の台頭など)
@@ -1853,6 +1879,128 @@ function triggerCityRebellion(n, cities) {
     }
 }
 
+function triggerSuccessionCivilWar(n) {
+    // Create the pretender nation
+    const rebel = new Nation();
+    rebel.baseName = n.baseName;
+    rebel.isRebel = false; // Claims to be legitimate
+    
+    rebel.isGrandEmpire = true;
+    rebel.sysBroad = n.sysBroad;
+    rebel.sysDetailed = n.sysDetailed;
+    rebel.sovereign = n.sovereign;
+    rebel.stateStruct = n.stateStruct;
+    rebel.ecoIdeology = n.ecoIdeology;
+    rebel.govType = n.govType;
+    rebel.tech = n.tech;
+    rebel.religion = n.religion;
+    rebel.color = `hsl(${Math.random()*360}, 100%, 30%)`; // Another dark color
+    
+    // Name handling - collision logic will handle uniqueness
+    rebel.updateName();
+    
+    if (n.cities.length < 2) return; // Cannot split if limited cities
+    
+    // Pick a second capital (furthest from current capital)
+    const capital = n.cities[0];
+    let bestCity = null;
+    let maxDist = -1;
+    
+    n.cities.forEach(c => {
+        if (c === capital) return;
+        const dist = getDistSq(c.tileIdx, capital.tileIdx);
+        if (dist > maxDist) {
+            maxDist = dist;
+            bestCity = c;
+        }
+    });
+    
+    if (!bestCity) return;
+    
+    // Assign cities closer to rebel capital to rebel
+    const rebelCities = [];
+    const loyalCities = [capital];
+    
+    n.cities.forEach(c => {
+        if (c === capital || c === bestCity) return;
+        
+        const d1 = getDistSq(c.tileIdx, capital.tileIdx);
+        const d2 = getDistSq(c.tileIdx, bestCity.tileIdx);
+        
+        if (d2 < d1) rebelCities.push(c);
+        else loyalCities.push(c);
+    });
+    rebelCities.push(bestCity);
+    
+    // Transfer cities
+    rebelCities.forEach(c => {
+        c.nationId = rebel.id;
+        rebel.cities.push(c);
+    });
+    n.cities = loyalCities;
+    
+    // Transfer tiles (Voronoi split)
+    const capX = capital.tileIdx % width;
+    const capY = Math.floor(capital.tileIdx / width);
+    const rebX = bestCity.tileIdx % width;
+    const rebY = Math.floor(bestCity.tileIdx / width);
+    
+    const newNTiles = [];
+    n.tiles.forEach(tIdx => {
+        const tx = tIdx % width;
+        const ty = Math.floor(tIdx / width);
+        const d1 = (tx-capX)**2 + (ty-capY)**2;
+        const d2 = (tx-rebX)**2 + (ty-rebY)**2;
+        
+        if (d2 < d1) {
+            ownerGrid[tIdx] = rebel.id;
+            rebel.tiles.push(tIdx);
+        } else {
+            newNTiles.push(tIdx);
+        }
+    });
+    n.tiles = newNTiles;
+    
+    // Distribute Stats
+    const ratio = rebel.tiles.length / (rebel.tiles.length + n.tiles.length);
+    
+    rebel.pop = Math.floor(n.pop * ratio);
+    n.pop = Math.floor(n.pop - rebel.pop);
+    
+    rebel.soldiers = Math.floor(n.soldiers * ratio);
+    n.soldiers = Math.floor(n.soldiers - rebel.soldiers);
+    
+    rebel.gdp = Math.floor(n.gdp * ratio);
+    n.gdp = Math.floor(n.gdp - rebel.gdp);
+    
+    // Push to nations array
+    if (rebel.tiles.length > 0) {
+        nations.push(rebel);
+        rebel.updateCentroid();
+        n.updateCentroid();
+        
+        // War
+        declareWar(n, rebel);
+        
+        // Log
+        log(`帝位継承戦争: ${n.name}の皇帝崩御に伴い、国が二つに割れました！双方が正統性を主張しています。`, "log-war");
+        n.addHistory(`内戦勃発: 帝位継承戦争`);
+        rebel.addHistory(`内戦勃発: 帝位継承戦争`);
+        
+        // Reduce stability significantly
+        n.stability = 30;
+        rebel.stability = 30;
+    }
+}
+
+function getDistSq(idx1, idx2) {
+    const x1 = idx1 % width;
+    const y1 = Math.floor(idx1 / width);
+    const x2 = idx2 % width;
+    const y2 = Math.floor(idx2 / width);
+    return (x1-x2)**2 + (y1-y2)**2;
+}
+
 function simulateTick() {
     if (mapDirty) {
         updateContinents();
@@ -2044,6 +2192,9 @@ function simulateTick() {
         let change = (Math.random() - 0.5) * 5; 
         if (n.religion === target.religion) change += 5;
         else change -= 5;
+        
+        // Grand Empire: Hated by everyone
+        if (n.isGrandEmpire) change -= 2.0;
 
         // 世界の緊張感による悪化
         change -= (worldTension / 10);
@@ -2075,7 +2226,14 @@ function simulateTick() {
         }
 
         // 野心による開戦 (圧倒的有利な場合)
-        if ((neighbor || canNavalInvade) && n.getMilitaryPower() > target.getMilitaryPower() * 2 && Math.random() < 0.05) {
+        let ambitionThreshold = 2.0;
+        let ambitionChance = 0.05;
+        if (n.isGrandEmpire) {
+            ambitionThreshold = 1.2;
+            ambitionChance = 0.2; // Very aggressive
+        }
+
+        if ((neighbor || canNavalInvade) && n.getMilitaryPower() > target.getMilitaryPower() * ambitionThreshold && Math.random() < ambitionChance) {
             if (!n.atWarWith.includes(target.id)) {
                 // 傀儡国は主人に逆らわない
                 if (n.isPuppet && n.masterId === target.id) return;
