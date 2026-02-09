@@ -2187,8 +2187,25 @@ function simulateTick() {
     let maxScore = -1;
     nations.forEach(n => {
         if (!n.isDead) {
+            // Calculate total power including puppets
+            let totalGdp = n.gdp;
+            let totalPop = n.pop;
+            let totalMil = n.getMilitaryPower();
+            let totalTiles = n.tiles.length;
+
+            if (!n.isPuppet) {
+                nations.forEach(p => {
+                    if (p.isPuppet && p.masterId === n.id && !p.isDead) {
+                        totalGdp += p.gdp;
+                        totalPop += p.pop;
+                        totalMil += p.getMilitaryPower();
+                        totalTiles += p.tiles.length;
+                    }
+                });
+            }
+
             // Score = GDP + (Pop/100) + (Mil*10) + (Tiles*50)
-            const score = n.gdp + (n.pop / 100) + (n.getMilitaryPower() * 10) + (n.tiles.length * 50);
+            const score = totalGdp + (totalPop / 100) + (totalMil * 10) + (totalTiles * 50);
             if (score > maxScore) {
                 maxScore = score;
                 hegemonId = n.id;
@@ -2200,7 +2217,15 @@ function simulateTick() {
     if (hegemonId !== -1) {
         const h = nations.find(n => n.id === hegemonId);
         if (h && totalLandTiles > 0) {
-             const ratio = h.tiles.length / totalLandTiles;
+             // Calculate total tiles including puppets for hegemony status
+             let totalHegemonTiles = h.tiles.length;
+             nations.forEach(p => {
+                 if (p.isPuppet && p.masterId === h.id && !p.isDead) {
+                     totalHegemonTiles += p.tiles.length;
+                 }
+             });
+
+             const ratio = totalHegemonTiles / totalLandTiles;
              if (ratio >= 0.66) hegemonStatus = "秩序維持国";
              else if (ratio >= 0.40) hegemonStatus = "世界覇権国";
              else if (ratio >= 0.15) hegemonStatus = "地域覇権国";
