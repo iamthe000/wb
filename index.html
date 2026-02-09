@@ -326,6 +326,7 @@ let selectedNationId = -1;
 let continentMap = [];
 let mapDirty = true;
 let hegemonId = -1;
+let hegemonStatus = "";
 
 // マウス操作用
 let mousePressed = false;
@@ -1236,7 +1237,7 @@ function loop() {
             if (hegemonId !== -1) {
                 const h = nations.find(n => n.id === hegemonId);
                 if (h) {
-                    hEl.innerText = h.name;
+                    hEl.innerText = h.name + " (" + hegemonStatus + ")";
                     hEl.style.color = h.color;
                 } else {
                     hEl.innerText = "なし";
@@ -2122,11 +2123,25 @@ function simulateTick() {
         }
     });
 
+    hegemonStatus = "";
+    if (hegemonId !== -1) {
+        const h = nations.find(n => n.id === hegemonId);
+        if (h && totalLandTiles > 0) {
+             const ratio = h.tiles.length / totalLandTiles;
+             if (ratio >= 0.66) hegemonStatus = "秩序維持国";
+             else if (ratio >= 0.40) hegemonStatus = "世界覇権国";
+             else if (ratio >= 0.15) hegemonStatus = "地域覇権国";
+             else hegemonStatus = "列強";
+        } else {
+             hegemonStatus = "列強";
+        }
+    }
+
     nations.forEach(n => {
         if (n.isDead) return;
 
-        // 覇権国（世界の2/3を支配）の場合、秩序維持モード
-        if (n.id === hegemonId) {
+        // 覇権国（秩序維持国）の場合、秩序維持モード
+        if (n.id === hegemonId && hegemonStatus === "秩序維持国") {
             // 他国の戦争に介入して停戦させる (仲介)
             nations.forEach(other => {
                 if (other.id !== n.id && !other.isDead && other.atWarWith.length > 0) {
@@ -2146,7 +2161,7 @@ function simulateTick() {
                 }
             });
             
-            // 覇権国は自ら宣戦布告しない（反乱鎮圧などは除く）
+            // 覇権国（秩序維持国）は自ら宣戦布告しない（反乱鎮圧などは除く）
             return;
         }
 
