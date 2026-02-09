@@ -529,6 +529,48 @@ function openRankingModal() {
     const content = document.getElementById('ranking-content');
     content.innerHTML = '';
 
+    // Prepare Ranking Data (Aggregate Puppets)
+    const rankingData = [];
+    const activeNations = nations.filter(n => !n.isDead);
+
+    // 1. Initialize with independent nations
+    activeNations.forEach(n => {
+        if (!n.isPuppet) {
+            rankingData.push({
+                id: n.id,
+                name: n.name,
+                color: n.color,
+                gdp: n.gdp,
+                pop: n.pop,
+                military: n.getMilitaryPower(),
+                tiles: n.tiles.length,
+                isBloc: false
+            });
+        }
+    });
+
+    // 2. Add puppet stats to masters
+    activeNations.forEach(n => {
+        if (n.isPuppet && n.masterId !== -1) {
+            const masterData = rankingData.find(d => d.id === n.masterId);
+            if (masterData) {
+                masterData.gdp += n.gdp;
+                masterData.pop += n.pop;
+                masterData.military += n.getMilitaryPower();
+                masterData.tiles += n.tiles.length;
+                masterData.isBloc = true;
+            }
+        }
+    });
+
+    // 3. Update names and calculate score
+    rankingData.forEach(d => {
+        if (d.isBloc) {
+            d.name = `${d.name}(${d.name}圏)`;
+        }
+        d.score = Math.floor(d.gdp + (d.pop / 100) + (d.military * 10) + (d.tiles * 50));
+    });
+
     const createTable = (title, list, valueFn, formatFn) => {
         const section = document.createElement('div');
         section.innerHTML = `<h3 class="ranking-section-title">${title}</h3>`;
@@ -543,21 +585,21 @@ function openRankingModal() {
         
         // Body
         const tbody = document.createElement('tbody');
-        const activeNations = nations.filter(n => !n.isDead);
-        const sorted = activeNations.sort((a, b) => valueFn(b) - valueFn(a)).slice(0, 10);
+        // list is already processed rankingData
+        const sorted = list.slice().sort((a, b) => valueFn(b) - valueFn(a)).slice(0, 10);
         
         const maxVal = sorted.length > 0 ? valueFn(sorted[0]) : 1;
 
-        sorted.forEach((n, index) => {
+        sorted.forEach((d, index) => {
             const tr = document.createElement('tr');
-            const val = valueFn(n);
+            const val = valueFn(d);
             const percent = (val / maxVal) * 100;
             tr.innerHTML = `
                 <td>${index + 1}</td>
-                <td style="color:${n.color}; font-weight:bold;">${n.name}</td>
+                <td style="color:${d.color}; font-weight:bold;">${d.name}</td>
                 <td>
                     <div class="rank-bar-container">
-                        <div class="rank-bar" style="width: ${percent}%; background-color: ${n.color};"></div>
+                        <div class="rank-bar" style="width: ${percent}%; background-color: ${d.color};"></div>
                     </div>
                 </td>
                 <td style="text-align:right;">${formatFn ? formatFn(val) : val}</td>
@@ -569,20 +611,20 @@ function openRankingModal() {
         return section;
     };
 
-    // 0. Total Score (Hegemon check)
-    content.appendChild(createTable('総合国力スコア', nations, n => Math.floor(n.gdp + (n.pop / 100) + (n.getMilitaryPower() * 10) + (n.tiles.length * 50)), val => formatNum(val)));
+    // 0. Total Score
+    content.appendChild(createTable('総合国力スコア', rankingData, d => d.score, val => formatNum(val)));
 
     // 1. GDP
-    content.appendChild(createTable('GDP (経済力)', nations, n => n.gdp, val => formatNum(val)));
+    content.appendChild(createTable('GDP (経済力)', rankingData, d => d.gdp, val => formatNum(val)));
     
     // 2. Population
-    content.appendChild(createTable('人口', nations, n => n.pop, val => formatNum(val)));
+    content.appendChild(createTable('人口', rankingData, d => d.pop, val => formatNum(val)));
     
     // 3. Military Power
-    content.appendChild(createTable('軍事力 (推定)', nations, n => Math.floor(n.getMilitaryPower()), val => formatNum(val)));
+    content.appendChild(createTable('軍事力 (推定)', rankingData, d => Math.floor(d.military), val => formatNum(val)));
     
     // 4. Territory (Tiles)
-    content.appendChild(createTable('領土面積 (タイル数)', nations, n => n.tiles.length, val => val));
+    content.appendChild(createTable('領土面積 (タイル数)', rankingData, d => d.tiles, val => val));
 
     document.getElementById('ranking-modal').style.display = 'block';
 }
