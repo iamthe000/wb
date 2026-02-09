@@ -189,6 +189,7 @@ if ('serviceWorker' in navigator) {
             <div class="stat-row"><span>宗教:</span> <span id="n-religion"></span></div>
             <div class="stat-row"><span>技術:</span> <span id="n-tech"></span></div>
             <div class="stat-row"><span>安定度:</span> <span id="n-stability"></span></div>
+            <div class="stat-row"><span>統治安定度:</span> <span id="n-governance"></span></div>
             
             <hr style="border-color:#555">
             
@@ -942,6 +943,7 @@ class Nation {
 
         this.updateName();
         this.stability = 100;
+        this.governance = (this.sysBroad === '民主主義' ? 60 : (this.sysBroad === '全体主義' ? 70 : 50)) + (this.tech * 5);
         this.unrest = 0;
         this.leader = this.generateLeaderName();
         
@@ -1461,6 +1463,9 @@ function renderMap() {
 function handlePolitics(n) {
     if (n.isDead) return;
 
+    // 統治安定度の更新 (技術や体制の変化を反映)
+    n.governance = (n.sysBroad === '民主主義' ? 60 : (n.sysBroad === '全体主義' ? 70 : 50)) + (n.tech * 5);
+
     // 傀儡国の独立判定
     if (n.isPuppet) {
         const master = nations.find(m => m.id === n.masterId);
@@ -1531,7 +1536,8 @@ function handlePolitics(n) {
     }
 
     // 不満度の更新
-    n.unrest = 100 - n.stability;
+    // 統治安定度(Governance)が不満を緩和する
+    n.unrest = Math.max(0, 100 - n.stability - (n.governance / 2));
 
     // 都市ごとの不満度更新
     n.cities.forEach((city, idx) => {
@@ -1559,7 +1565,9 @@ function handlePolitics(n) {
     let rebellingCities = [];
     if (n.rebellionCooldown === 0 && n.cities.length > 0) {
         n.cities.forEach(city => {
-            if (city.unrest > 75 && Math.random() < 0.005) {
+            // 共和制(民主主義)の国は反乱確率を下げる (0.005 -> 0.002)
+            let rebelChance = (n.sysBroad === '民主主義') ? 0.002 : 0.005;
+            if (city.unrest > 75 && Math.random() < rebelChance) {
                 rebellingCities.push(city);
             }
         });
@@ -2271,6 +2279,15 @@ function simulateTick() {
         // 戦争判定 (閾値を下げ、好戦的に)
         // 隣接しているか、あるいは海軍力があり両者が沿岸国であれば宣戦布告可能
         const canNavalInvade = (n.tech >= 3 && n.ships >= 20 && n.isCoastal() && target.isCoastal());
+
+        // 経済大国(GDP>3000かつ自国の1.5倍以上)への攻撃は、軍事大国(軍事力1.5倍)か野心(帝国)、あるいは激怒(関係<-90)が必要
+        if (target.gdp > 3000 && target.gdp > n.gdp * 1.5) {
+             const isMilSuper = n.getMilitaryPower() > target.getMilitaryPower() * 1.5;
+             // 攻撃側が軍事大国でもなく、野心的な帝国でもなく、関係が最悪でもない場合は戦争を回避
+             if (!isMilSuper && !n.isGrandEmpire && n.relations[target.id] > -90) {
+                 return; 
+             }
+        }
         
         if (n.relations[target.id] < -50 && (neighbor || canNavalInvade)) {
             if (!n.atWarWith.includes(target.id)) {
@@ -2876,6 +2893,7 @@ function updateNationPanel() {
     document.getElementById('n-religion').innerText = n.religion;
     document.getElementById('n-tech').innerText = TECH_LEVELS[n.tech];
     document.getElementById('n-stability').innerText = Math.floor(n.stability) + "%";
+    document.getElementById('n-governance').innerText = Math.floor(n.governance);
     
     document.getElementById('n-gdp').innerText = formatNum(n.gdp);
     document.getElementById('bar-gdp').style.width = Math.min(100, n.gdp / 1000) + "%";
