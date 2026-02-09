@@ -2290,6 +2290,14 @@ function simulateTick() {
                  return; 
              }
         }
+
+        // 民主主義国同士の平和 (Democratic Peace Theory)
+        // 双方が民主主義の場合、よほどの対立(関係<-80)や野心がない限り戦争を回避する
+        if (n.sysBroad === '民主主義' && target.sysBroad === '民主主義') {
+            if (n.relations[target.id] > -80 && !n.isGrandEmpire) {
+                return;
+            }
+        }
         
         if (n.relations[target.id] < -50 && (neighbor || canNavalInvade)) {
             if (!n.atWarWith.includes(target.id)) {
