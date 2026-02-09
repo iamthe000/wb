@@ -328,6 +328,7 @@ let continentMap = [];
 let mapDirty = true;
 let hegemonId = -1;
 let hegemonStatus = "";
+let highTensionDuration = 0;
 
 // マウス操作用
 let mousePressed = false;
@@ -2088,6 +2089,32 @@ function simulateTick() {
     // 緊張感の自然減衰
     worldTension = Math.max(0, worldTension - 0.2);
 
+    // 長期高緊張による厭戦
+    if (worldTension > 90) {
+        highTensionDuration++;
+    } else {
+        highTensionDuration = 0;
+    }
+
+    if (highTensionDuration > 1000) {
+        // 全世界的な和平交渉
+        log("千年戦争の疲弊: 世界中で厭戦気分が高まり、多くの国々が停戦合意に至りました。", "log-peace");
+        nations.forEach(n => {
+            if (!n.isDead && n.atWarWith.length > 0) {
+                // 戦争相手をすべてコピー
+                const enemies = [...n.atWarWith];
+                enemies.forEach(eId => {
+                    const enemy = nations.find(e => e.id === eId);
+                    if (enemy && !enemy.isDead && n.atWarWith.includes(eId)) {
+                        concludePeace(n, enemy, 'WHITE_PEACE');
+                    }
+                });
+            }
+        });
+        highTensionDuration = 0;
+        worldTension = 50; // 強制的に緊張緩和
+    }
+
     // 1. 内政フェーズ
     nations.forEach(n => {
         if (n.isDead) return;
@@ -2226,12 +2253,110 @@ function simulateTick() {
              });
 
              const ratio = totalHegemonTiles / totalLandTiles;
-             if (ratio >= 0.66) hegemonStatus = "秩序維持国";
-             else if (ratio >= 0.40) hegemonStatus = "世界覇権国";
-             else if (ratio >= 0.15) hegemonStatus = "地域覇権国";
+             // ユーザー要望により閾値を緩和
+             if (ratio >= 0.50) hegemonStatus = "秩序維持国";
+             else if (ratio >= 0.30) hegemonStatus = "世界覇権国";
+             else if (ratio >= 0.10) hegemonStatus = "地域覇権国";
              else hegemonStatus = "列強";
         } else {
              hegemonStatus = "列強";
+        }
+    }
+
+    // 連邦・合衆国の形成 (上位3カ国以外が対象、脅威に対抗)
+    if (worldTension > 50 || hegemonId !== -1) {
+        // スコア順にソートして上位3つを特定
+        const sortedNations = nations.filter(n => !n.isDead).map(n => {
+             // 簡易スコア計算
+             const s = n.gdp + (n.pop/100) + (n.getMilitaryPower()*10) + (n.tiles.length*50);
+             return { id: n.id, score: s };
+        }).sort((a,b) => b.score - a.score);
+        
+        const top3Ids = sortedNations.slice(0, 3).map(d => d.id);
+
+        // ランダムに1カ国選んで合併判定
+        const potentialMergers = nations.filter(n => !n.isDead && !n.isPuppet && !top3Ids.includes(n.id));
+        if (potentialMergers.length > 0) {
+            const n1 = potentialMergers[Math.floor(Math.random() * potentialMergers.length)];
+            
+            // 同じ宗教を持つ隣接国を探す
+            // 重いので簡易チェック (全探索せず、neighborsリストもないので、数回サンプリング)
+            for (let i = 0; i < 20; i++) {
+                if (n1.tiles.length === 0) break;
+                const tile = n1.tiles[Math.floor(Math.random() * n1.tiles.length)];
+                const cx = tile % width;
+                const cy = Math.floor(tile / width);
+                let neighborId = -1;
+                
+                [[0,1],[0,-1],[1,0],[-1,0]].forEach(([dx, dy]) => {
+                    let nx=cx+dx, ny=cy+dy;
+                    if(nx>=0 && nx<width && ny>=0 && ny<height) {
+                        let nIdx = ny*width+nx;
+                        if(ownerGrid[nIdx] !== -1 && ownerGrid[nIdx] !== n1.id) {
+                            neighborId = ownerGrid[nIdx];
+                        }
+                    }
+                });
+
+                if (neighborId !== -1) {
+                    const n2 = nations.find(n => n.id === neighborId);
+                    if (n2 && !n2.isDead && !n2.isPuppet && !top3Ids.includes(n2.id)) {
+                        if (n1.religion === n2.religion && !n1.atWarWith.includes(n2.id)) {
+                            // 合併実行 (低確率)
+                            if (Math.random() < 0.005) {
+                                log(`連邦形成: 共通の脅威に対抗するため、${n1.name}と${n2.name}は${n1.religion}の旗印のもとに統合しました！`, "log-peace");
+                                n1.addHistory(`連邦形成: ${n2.name}と統合`);
+                                n2.addHistory(`連邦形成: ${n1.name}と統合`);
+
+                                // n2をn1に吸収
+                                const n2Tiles = [...n2.tiles];
+                                n2Tiles.forEach(t => {
+                                    ownerGrid[t] = n1.id;
+                                    n1.tiles.push(t);
+                                });
+                                n2.tiles = [];
+
+                                n2.cities.forEach(c => {
+                                    c.nationId = n1.id;
+                                    n1.cities.push(c);
+                                });
+                                n2.cities = [];
+
+                                n1.gdp += n2.gdp;
+                                n1.pop += n2.pop;
+                                n1.soldiers += n2.soldiers;
+                                n1.tanks += n2.tanks;
+                                n1.ships += n2.ships;
+
+                                n2.isDead = true;
+                                n2.pop = 0;
+
+                                // 体制変更と改名
+                                n1.stateStruct = '連邦国家';
+                                // 民主主義なら合衆国化（大統領制へ）
+                                if (n1.sysBroad === '民主主義') {
+                                    n1.sysDetailed = '大統領制';
+                                    n1.govType = '大統領制';
+                                }
+                                
+                                n1.updateName();
+                                n1.stability = Math.min(100, n1.stability + 20); // 結束による安定化
+                                
+                                // 戦争状態の引継ぎ
+                                n2.atWarWith.forEach(eid => {
+                                    if (!n1.atWarWith.includes(eid)) {
+                                        n1.atWarWith.push(eid);
+                                        const enemy = nations.find(e => e.id === eid);
+                                        if (enemy && !enemy.atWarWith.includes(n1.id)) enemy.atWarWith.push(n1.id);
+                                    }
+                                });
+
+                                break; // 1ターンに1回のみ
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 
