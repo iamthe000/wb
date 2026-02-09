@@ -2097,22 +2097,59 @@ function simulateTick() {
     }
 
     if (highTensionDuration > 1000) {
-        // 全世界的な和平交渉
-        log("千年戦争の疲弊: 世界中で厭戦気分が高まり、多くの国々が停戦合意に至りました。", "log-peace");
+        // 全世界的な和平交渉 (必ずしも平和にはならない)
+        log("千年戦争の疲弊: 世界中で厭戦気分が高まり、各国で和平交渉が開始されました。", "log-peace");
+        
+        // 交渉済みペアを記録 (A-BとB-Aで二重処理しないため)
+        const negotiatedPairs = new Set();
+
         nations.forEach(n => {
             if (!n.isDead && n.atWarWith.length > 0) {
-                // 戦争相手をすべてコピー
                 const enemies = [...n.atWarWith];
                 enemies.forEach(eId => {
+                    const pairKey = [n.id, eId].sort().join('-');
+                    if (negotiatedPairs.has(pairKey)) return;
+                    negotiatedPairs.add(pairKey);
+
                     const enemy = nations.find(e => e.id === eId);
-                    if (enemy && !enemy.isDead && n.atWarWith.includes(eId)) {
-                        concludePeace(n, enemy, 'WHITE_PEACE');
+                    if (enemy && !enemy.isDead) {
+                        const nPow = n.getMilitaryPower();
+                        const ePow = enemy.getMilitaryPower();
+                        const ratio = nPow > ePow ? nPow / ePow : ePow / nPow;
+                        const isNStronger = nPow > ePow;
+                        const strong = isNStronger ? n : enemy;
+                        const weak = isNStronger ? enemy : n;
+
+                        if (ratio > 1.5) {
+                            // 一方が有利な場合
+                            const rand = Math.random();
+                            if (rand < 0.6) {
+                                // 有利な条件で講和
+                                concludePeace(strong, weak, 'PARTIAL_PEACE');
+                            } else if (rand < 0.8) {
+                                // 痛み分け
+                                concludePeace(strong, weak, 'WHITE_PEACE');
+                            } else {
+                                // 交渉決裂 (継戦)
+                                log(`交渉決裂: ${strong.name}は${weak.name}への要求を譲らず、戦争は継続されます。`, "log-war");
+                            }
+                        } else {
+                            // 膠着状態
+                            const rand = Math.random();
+                            if (rand < 0.8) {
+                                // 疲弊して停戦
+                                concludePeace(n, enemy, 'WHITE_PEACE');
+                            } else {
+                                // 意地の張り合い
+                                log(`交渉決裂: ${n.name}と${enemy.name}は互いに譲歩せず、泥沼の戦いが続きます。`, "log-war");
+                            }
+                        }
                     }
                 });
             }
         });
         highTensionDuration = 0;
-        worldTension = 50; // 強制的に緊張緩和
+        worldTension = Math.max(0, worldTension - 30); // 緊張緩和するが完全平和ではない
     }
 
     // 1. 内政フェーズ
