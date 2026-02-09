@@ -2370,10 +2370,17 @@ function simulateTick() {
 
                                 // 体制変更と改名
                                 n1.stateStruct = '連邦国家';
-                                // 民主主義なら合衆国化（大統領制へ）
+                                // 民主主義なら確率で合衆国化（大統領制へ）、それ以外は連邦共和国（議院内閣制など）
                                 if (n1.sysBroad === '民主主義') {
-                                    n1.sysDetailed = '大統領制';
-                                    n1.govType = '大統領制';
+                                    if (Math.random() < 0.2) {
+                                        // 20%の確率で合衆国 (United States)
+                                        n1.sysDetailed = '大統領制';
+                                        n1.govType = '大統領制';
+                                    } else {
+                                        // 80%の確率で連邦共和国 (Federation) - 議院内閣制をベースにする
+                                        n1.sysDetailed = '議院内閣制';
+                                        n1.govType = '議院内閣制';
+                                    }
                                 }
                                 
                                 n1.updateName();
