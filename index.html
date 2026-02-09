@@ -1530,7 +1530,9 @@ function handlePolitics(n) {
 
     // 安定度の自然変動
     if (n.atWarWith.length > 0) {
-        n.stability -= 0.4;
+        // 民主主義は戦争疲弊が少ない
+        const stabLoss = (n.sysBroad === '民主主義') ? 0.2 : 0.4;
+        n.stability -= stabLoss;
     } else {
         n.stability = Math.min(100, n.stability + 0.5);
     }
