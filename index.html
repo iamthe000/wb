@@ -168,6 +168,7 @@ if ('serviceWorker' in navigator) {
                 シナリオ: <select id="scenarioSelect">
                     <option value="BLITZKRIEG" selected>電撃戦</option>
                     <option value="QUIET_SPARKS">静かなる火花</option>
+                    <option value="GRACEFUL_US">優雅なる合衆国</option>
                 </select>
             </div>
             <button id="btn-fill" style="margin-bottom:10px;">塗りつぶしモード: オフ</button>
@@ -1204,28 +1205,91 @@ function spawnNations() {
         if(grid[i] === 1) landTiles.push(i);
     }
 
-    // 土地の広さに応じて国家数を決定
-    const numNations = Math.max(2, Math.floor(landTiles.length / 50)); 
     nationIdCounter = 0;
-    
-    for(let i=0; i<numNations; i++) {
-        if(landTiles.length === 0) break;
-        // ランダムな陸地を選ぶ
-        let rndIdx = Math.floor(Math.random() * landTiles.length);
-        let tileIdx = landTiles[rndIdx];
-        landTiles.splice(rndIdx, 1);
+
+    if (currentScenario === 'GRACEFUL_US') {
+        if (landTiles.length === 0) return;
         
-        let y = Math.floor(tileIdx / width);
-        let x = tileIdx % width;
+        // Create One Massive Nation
+        const us = new Nation(undefined, undefined, undefined); // No initial spawn tile yet
+        us.name = "アメリカ合衆国";
+        us.baseName = "アメリカ";
+        us.color = "#3498db"; // Blue
+        us.sysBroad = "民主主義";
+        us.sysDetailed = "大統領制";
+        us.sovereign = "国民";
+        us.govType = "大統領制";
+        us.tech = 3; // Modern
+        us.pop = 330000000;
+        us.gdp = 23000000;
+        us.soldiers = 1000000;
+        us.stability = 80;
         
-        // 既に誰かの領土ならスキップ（初期配置は離す）
-        if(ownerGrid[tileIdx] !== -1) continue;
+        // Initialize Domestic Politics
+        us.parties = [
+            { name: "民主党", color: "#3498db", support: 50, seats: 0, ideology: "リベラル" },
+            { name: "共和党", color: "#e74c3c", support: 48, seats: 0, ideology: "保守" },
+            { name: "リバタリアン党", color: "#f1c40f", support: 2, seats: 0, ideology: "自由至上主義" }
+        ];
+        us.parliamentSize = 535;
         
-        nations.push(new Nation(undefined, x, y));
+        // Calculate initial seats
+        let remaining = us.parliamentSize;
+        us.parties.forEach(p => {
+            let s = Math.floor((p.support / 100) * us.parliamentSize);
+            p.seats = s;
+            remaining -= s;
+        });
+        us.parties[0].seats += remaining; // Give remainder to Dems
+
+        us.president = { name: "ジョン・ドウ", ideology: "中道", term: 1 };
+        us.electionYear = year + 4;
+        
+        // Assign all land
+        landTiles.forEach(tIdx => {
+            ownerGrid[tIdx] = us.id;
+            us.tiles.push(tIdx);
+        });
+        
+        // Generate State Capitals
+        const numStates = 50;
+        for (let i=0; i<numStates; i++) {
+            if (us.tiles.length === 0) break;
+            const t = us.tiles[Math.floor(Math.random() * us.tiles.length)];
+            // Check distance
+            const tooClose = us.cities.some(c => getDistSq(c.tileIdx, t) < 100);
+            if (!tooClose) {
+                const cityName = us.generateCityName();
+                us.cities.push(new City(cityName, t, us.id));
+            }
+        }
+        
+        us.updateCentroid();
+        nations.push(us);
+        
+    } else {
+        // Default Spawning Logic
+        const numNations = Math.max(2, Math.floor(landTiles.length / 50)); 
+        
+        for(let i=0; i<numNations; i++) {
+            if(landTiles.length === 0) break;
+            // ランダムな陸地を選ぶ
+            let rndIdx = Math.floor(Math.random() * landTiles.length);
+            let tileIdx = landTiles[rndIdx];
+            landTiles.splice(rndIdx, 1);
+            
+            let y = Math.floor(tileIdx / width);
+            let x = tileIdx % width;
+            
+            // 既に誰かの領土ならスキップ（初期配置は離す）
+            if(ownerGrid[tileIdx] !== -1) continue;
+            
+            nations.push(new Nation(undefined, x, y));
+        }
+        
+        // 初期領土拡大 (Flood fill的)
+        expandTerritoryInitial();
     }
-    
-    // 初期領土拡大 (Flood fill的)
-    expandTerritoryInitial();
 }
 
 function expandTerritoryInitial() {
@@ -2262,6 +2326,75 @@ function triggerImperialCollapse(n) {
     n.soldiers = 0;
 }
 
+function simulateDomesticPolitics(n) {
+    // 1. Party Support Fluctuation
+    n.parties.forEach(p => {
+        let change = (Math.random() - 0.5) * 2;
+        // Effect of stability
+        if (n.stability < 50 && p.name !== "民主党") change += 0.5; // Unrest helps opposition (simplified)
+        p.support = Math.max(0, p.support + change);
+    });
+    
+    // Normalize support
+    let totalSupport = n.parties.reduce((sum, p) => sum + p.support, 0);
+    n.parties.forEach(p => p.support = (p.support / totalSupport) * 100);
+
+    // 2. Random Events
+    if (Math.random() < 0.05) {
+        const events = [
+            { msg: "経済ブーム！与党の支持率が上昇。", target: "ruling", effect: 5 },
+            { msg: "政治スキャンダル発覚。与党の支持率が低下。", target: "ruling", effect: -5 },
+            { msg: "大規模な抗議デモが発生。", target: "stability", effect: -10 },
+            { msg: "新技術の導入により国力が増大。", target: "gdp", effect: 100000 }
+        ];
+        const evt = events[Math.floor(Math.random() * events.length)];
+        
+        // Identify ruling party (most seats or president's party - for now assume first is ruling or match president ideology)
+        // Simplified: The party with max support is "ruling" in public eye for support swings
+        let rulingParty = n.parties.reduce((prev, current) => (prev.support > current.support) ? prev : current);
+        
+        if (evt.target === "ruling") {
+            rulingParty.support += evt.effect;
+            log(`国内ニュース: ${evt.msg}`, "log-info");
+        } else if (evt.target === "stability") {
+            n.stability = clamp(n.stability + evt.effect, 0, 100);
+            log(`国内ニュース: ${evt.msg}`, "log-war");
+        } else if (evt.target === "gdp") {
+            n.gdp += evt.effect;
+            log(`国内ニュース: ${evt.msg}`, "log-peace");
+        }
+    }
+
+    // 3. Elections
+    if (year >= n.electionYear) {
+        log(`大統領選挙: 選挙の年がやってきました！`, "log-info");
+        n.electionYear = year + 4;
+        
+        // Calculate Seats based on support
+        let remainingSeats = n.parliamentSize;
+        n.parties.forEach(p => {
+            let seats = Math.floor((p.support / 100) * n.parliamentSize);
+            p.seats = seats;
+            remainingSeats -= seats;
+        });
+        // Give remainder to top party
+        let winner = n.parties.reduce((prev, current) => (prev.support > current.support) ? prev : current);
+        winner.seats += remainingSeats;
+        
+        // Elect President
+        let newPresName = n.generateLeaderName();
+        n.president = {
+            name: newPresName,
+            ideology: winner.ideology,
+            term: 1
+        };
+        n.leader = newPresName; // Sync with standard prop
+        
+        log(`選挙結果: ${winner.name}が勝利し、${newPresName}が新大統領に就任しました。（思想: ${winner.ideology}）`, "log-peace");
+        n.addHistory(`選挙: ${winner.name}勝利, ${newPresName}就任`);
+    }
+}
+
 function simulateTick() {
     if (mapDirty) {
         updateContinents();
@@ -2432,7 +2565,16 @@ function simulateTick() {
     });
     document.getElementById('info-pop').innerText = formatNum(totalPop);
 
-    // 2. 外交フェーズ
+    // 2. 外交フェーズ / 国内政治フェーズ
+    if (currentScenario === 'GRACEFUL_US') {
+        const us = nations[0];
+        if (us && !us.isDead) {
+            simulateDomesticPolitics(us);
+        }
+        // Skip normal diplomacy
+        return; 
+    }
+
     hegemonId = -1;
     let maxScore = -1;
     nations.forEach(n => {
@@ -3350,6 +3492,48 @@ function updateNationPanel() {
     document.getElementById('n-tanks').innerText = n.tanks;
     document.getElementById('n-ships').innerText = n.ships;
     document.getElementById('n-qual').innerText = n.soldierQuality.toFixed(2);
+
+    // Domestic Politics Display
+    const existingPolitics = document.getElementById('us-politics-section');
+    if (existingPolitics) existingPolitics.remove();
+
+    if (currentScenario === 'GRACEFUL_US' && n.parties) {
+        const politicsDiv = document.createElement('div');
+        politicsDiv.id = 'us-politics-section';
+        politicsDiv.style.marginTop = '15px';
+        politicsDiv.style.borderTop = '1px solid #555';
+        politicsDiv.style.paddingTop = '10px';
+        
+        let html = `<h3>国内政治状況</h3>`;
+        if (n.president) {
+            html += `<div class="stat-row"><span>大統領:</span> <span>${n.president.name}</span></div>`;
+            html += `<div class="stat-row"><span>思想:</span> <span>${n.president.ideology}</span></div>`;
+            html += `<div class="stat-row"><span>次期選挙:</span> <span>${n.electionYear}年</span></div>`;
+        }
+        
+        html += `<h4 style="margin:5px 0; color:#ccc; font-size:0.9em;">議席分布 (全${n.parliamentSize}席)</h4>`;
+        
+        // Simple visual bar
+        html += `<div style="display:flex; height:15px; width:100%; background:#333; border-radius:3px; overflow:hidden; margin-bottom:5px;">`;
+        n.parties.forEach(p => {
+            const width = (p.seats / n.parliamentSize) * 100;
+            if (width > 0) {
+                html += `<div style="width:${width}%; background:${p.color};" title="${p.name}: ${p.seats}席"></div>`;
+            }
+        });
+        html += `</div>`;
+
+        // List
+        n.parties.forEach(p => {
+            html += `<div class="stat-row" style="font-size:0.8em; color:${p.color}">
+                <span>${p.name} (${p.ideology}):</span> 
+                <span>${p.seats}席 / 支持率${p.support.toFixed(1)}%</span>
+            </div>`;
+        });
+
+        politicsDiv.innerHTML = html;
+        document.getElementById('nation-panel').insertBefore(politicsDiv, document.getElementById('btn-history'));
+    }
 }
 
 function log(msg, className) {
