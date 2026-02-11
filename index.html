@@ -1280,7 +1280,25 @@ function spawnNations() {
         };
         us.electionYear = year + 4;
         us.midtermYear = year + 2;
-        us.supportHistory = []; // Array of { year, parties: [{name, support}] }
+        us.supportHistory = []; 
+
+        // Economy Init
+        us.economy = {
+            cycle: 0, // 0 to 2*PI
+            growthRate: 0.02,
+            inflation: 0.02,
+            status: "安定成長"
+        };
+
+        // Supreme Court Init (9 Justices)
+        us.supremeCourt = [];
+        for(let i=0; i<9; i++) {
+            us.supremeCourt.push({
+                name: us.generateLeaderName(), // Reuse generator
+                age: 50 + Math.floor(Math.random() * 25),
+                ideology: Math.random() > 0.5 ? "保守" : "リベラル"
+            });
+        }
         
         // Assign all land
         landTiles.forEach(tIdx => {
@@ -1288,26 +1306,50 @@ function spawnNations() {
             us.tiles.push(tIdx);
         });
         
-        // Generate State Capitals & Initialize Local Politics
-        const numStates = 50;
-        for (let i=0; i<numStates; i++) {
+        // Generate State Regions & Cities
+        us.states = [];
+        const stateNames = [
+            "ニュー・イングランド", "大西洋岸中部", "南部", "中西部", "南西部", "山岳部", "太平洋岸",
+            "アパラチア", "五大湖", "フロリダ", "テキサス", "カリフォルニア"
+        ];
+        
+        stateNames.forEach((name, idx) => {
+            us.states.push({
+                id: idx,
+                name: name,
+                lean: (Math.random() - 0.5) * 20, // Negative: Rep, Positive: Dem
+                cities: []
+            });
+        });
+
+        const numCities = 50;
+        for (let i=0; i<numCities; i++) {
             if (us.tiles.length === 0) break;
             const t = us.tiles[Math.floor(Math.random() * us.tiles.length)];
-            // Check distance
             const tooClose = us.cities.some(c => getDistSq(c.tileIdx, t) < 100);
+            
             if (!tooClose) {
                 const cityName = us.generateCityName();
                 const city = new City(cityName, t, us.id);
                 
+                // Assign to a State (Nearest center logic or just random for now? Random is simpler for generation)
+                const assignedState = us.states[Math.floor(Math.random() * us.states.length)];
+                city.stateId = assignedState.id;
+                assignedState.cities.push(city);
+
                 // Electoral Votes (Census: Base 3 + Random Pop Factor)
                 city.electoralVotes = 3 + Math.floor(Math.random() * 10); 
 
-                // Initialize local support with variance
+                // Initialize local support with State Lean
                 let total = 0;
                 us.parties.forEach(p => {
-                    let base = p.support; // National average
-                    // Random variance: +/- 20%
-                    let variance = (Math.random() - 0.5) * 40;
+                    let base = p.support; 
+                    // Apply State Lean
+                    if (p.name === "民主党") base += assignedState.lean;
+                    if (p.name === "共和党") base -= assignedState.lean;
+                    
+                    // Random variance
+                    let variance = (Math.random() - 0.5) * 20;
                     let val = Math.max(0, base + variance);
                     city.partySupport[p.name] = val;
                     total += val;
@@ -2442,22 +2484,106 @@ function simulateDomesticPolitics(n) {
     const isDivided = rulingParty ? (rulingParty.seats < n.parliamentSize / 2) : false;
     n.isDividedGovernment = isDivided;
 
-    // Legislation Attempt (Quarterly: once every ~3 ticks assuming sim speed)
-    // Actually run every tick with low probability
+    // Economic Cycle Simulation
+    if (n.economy) {
+        n.economy.cycle += 0.02; // Slow cycle
+        if (n.economy.cycle > Math.PI * 2) n.economy.cycle -= Math.PI * 2;
+        
+        // Sine wave for growth: Amplitude 0.04 centered at 0.02
+        let baseGrowth = 0.02 + Math.sin(n.economy.cycle) * 0.04; 
+        
+        // Random shock
+        if (Math.random() < 0.01) baseGrowth -= 0.05; // Crash
+        
+        n.economy.growthRate = baseGrowth;
+        n.economy.inflation = Math.max(0, 0.02 + baseGrowth * 0.5); // Inflation follows growth
+
+        // Update GDP
+        n.gdp = Math.floor(n.gdp * (1 + n.economy.growthRate));
+        
+        // Update Status String
+        if (baseGrowth > 0.04) n.economy.status = "好況 (Boom)";
+        else if (baseGrowth > 0.01) n.economy.status = "安定成長";
+        else if (baseGrowth > -0.01) n.economy.status = "停滞 (Stagnation)";
+        else n.economy.status = "不況 (Recession)";
+
+        // Impact Approval
+        if (baseGrowth > 0.03) n.president.approval += 0.2;
+        if (baseGrowth < 0) n.president.approval -= 0.5;
+        if (n.economy.inflation > 0.05) n.president.approval -= 0.2; // Hate inflation
+    }
+
+    // Supreme Court Simulation
+    if (n.supremeCourt) {
+        // Aging and Death
+        if (Math.random() < 0.1) { // Check occasionally
+            for (let i = 0; i < n.supremeCourt.length; i++) {
+                n.supremeCourt[i].age += 0.1; // Slow aging
+                
+                // Death chance
+                let deathChance = (n.supremeCourt[i].age - 60) * 0.0005;
+                if (Math.random() < deathChance) {
+                    // Justice Dies
+                    const oldJustice = n.supremeCourt[i];
+                    log(`訃報: 最高裁判事の${oldJustice.name}氏(${oldJustice.age.toFixed(0)}歳/${oldJustice.ideology})が死去しました。`, "log-info");
+                    
+                    // Appoint New
+                    // President appoints someone of their ideology
+                    // But if senate is divided, might force a moderate? 
+                    // Simplified: President appoints matches their party ideology
+                    let newIdeology = "中道";
+                    if (rulingParty) {
+                        newIdeology = rulingParty.ideology === "リベラル" ? "リベラル" : "保守";
+                    }
+                    
+                    const newJustice = {
+                        name: n.generateLeaderName(),
+                        age: 45 + Math.floor(Math.random() * 15),
+                        ideology: newIdeology
+                    };
+                    n.supremeCourt[i] = newJustice;
+                    
+                    log(`指名: 大統領は後任に${newJustice.name}氏(${newJustice.ideology})を指名しました。`, "log-peace");
+                    
+                    // Stability hit due to political fighting
+                    n.stability -= 5;
+                }
+            }
+        }
+    }
+
+    // Legislation Attempt
     let legChance = 0.05; 
     if (isDivided) legChance = 0.01; // Gridlock
     else legChance = 0.10; // Unified
 
     if (Math.random() < legChance && rulingParty) {
-        // Successful Legislation
-        const stats = rulingParty.stats;
+        // Judicial Review Check
         let passed = true;
-        
-        // Apply Effects
-        if (stats) {
-            n.stability = clamp(n.stability + stats.stab, 0, 100);
-            n.gdp = Math.floor(n.gdp * (1 + stats.gdp * 0.005)); // Small compound growth
-            n.industry += stats.gdp * 2;
+        if (n.supremeCourt) {
+            // Count ideologies
+            let conservatives = n.supremeCourt.filter(j => j.ideology === "保守").length;
+            let liberals = n.supremeCourt.filter(j => j.ideology === "リベラル").length;
+            let courtLeans = conservatives > liberals ? "保守" : "リベラル";
+            
+            // If Court opposes Party Ideology
+            let partyIdeology = rulingParty.ideology === "リベラル" ? "リベラル" : "保守";
+            
+            if (courtLeans !== partyIdeology && Math.random() < 0.3) {
+                passed = false;
+                log(`違憲判決: 最高裁は${rulingParty.name}の法案を違憲とし、差し止めました。`, "log-war");
+                n.stability -= 2;
+            }
+        }
+
+        // Successful Legislation (if not blocked)
+        if (passed) {
+            const stats = rulingParty.stats;
+            // Apply Effects
+            if (stats) {
+                n.stability = clamp(n.stability + stats.stab, 0, 100);
+                n.gdp = Math.floor(n.gdp * (1 + stats.gdp * 0.005));
+                n.industry += stats.gdp * 2;
             
             // Military / Tech
             if (stats.mil > 0) {
@@ -2642,29 +2768,52 @@ function simulateDomesticPolitics(n) {
         let seatWinner = n.parties.reduce((prev, current) => (prev.support > current.support) ? prev : current);
         seatWinner.seats += remainingSeats;
 
-        // 2. Electoral College (Presidential)
+        // 2. Electoral College (State Winner-Take-All)
         let evResults = {};
         let totalEV = 0;
         n.parties.forEach(p => evResults[p.name] = 0);
         
-        n.cities.forEach(city => {
-            let cityWinner = null;
-            let maxSupport = -1;
-            // Find local winner
-            n.parties.forEach(p => {
-                let support = city.partySupport[p.name] || 0;
-                if (support > maxSupport) {
-                    maxSupport = support;
-                    cityWinner = p;
+        // Ensure states exist
+        if (!n.states) n.states = [];
+
+        n.states.forEach(state => {
+            // Aggregate votes in state
+            let stateVotes = {};
+            n.parties.forEach(p => stateVotes[p.name] = 0);
+            let stateEV = 0;
+
+            // Sum up cities in this state
+            let hasCities = false;
+            n.cities.forEach(city => {
+                if (city.stateId === state.id) {
+                    hasCities = true;
+                    stateEV += (city.electoralVotes || 3);
+                    n.parties.forEach(p => {
+                        stateVotes[p.name] += city.partySupport[p.name] || 0;
+                    });
                 }
             });
-            
-            if (cityWinner) {
-                let ev = city.electoralVotes || 3;
-                evResults[cityWinner.name] += ev;
-                totalEV += ev;
+
+            if (hasCities) {
+                // Find State Winner
+                let stateWinnerName = Object.keys(stateVotes).reduce((a, b) => stateVotes[a] > stateVotes[b] ? a : b);
+                evResults[stateWinnerName] += stateEV;
+                totalEV += stateEV;
             }
         });
+        
+        // Fallback if no states defined (compatibility)
+        if (totalEV === 0) {
+             n.cities.forEach(city => {
+                let winner = n.parties[0];
+                let max = -1;
+                n.parties.forEach(p => {
+                    if (city.partySupport[p.name] > max) { max = city.partySupport[p.name]; winner = p; }
+                });
+                evResults[winner.name] += (city.electoralVotes || 3);
+                totalEV += (city.electoralVotes || 3);
+             });
+        }
         
         // Find Winner
         let presWinnerName = Object.keys(evResults).reduce((a, b) => evResults[a] > evResults[b] ? a : b);
@@ -3887,42 +4036,174 @@ function updateNationPanel() {
             });
         }
 
-        // Draw Support Trend Chart
+        // Draw Support Trend Chart (Stacked Area)
         const tCanvas = document.getElementById('support-trend-chart');
         if (tCanvas && n.supportHistory.length > 1) {
             const tCtx = tCanvas.getContext('2d');
             const history = n.supportHistory;
             const w = tCanvas.width;
             const h = tCanvas.height;
-            const padding = 10;
-            const drawW = w - padding*2;
-            const drawH = h - padding*2;
+            const padding = 20; // Increased padding for labels
+            const drawW = w - padding * 2;
+            const drawH = h - padding * 2;
             
-            // Grid lines
-            tCtx.strokeStyle = "#444";
+            tCtx.clearRect(0, 0, w, h);
+
+            // Draw Areas
+            // We need to iterate by history entry first
+            let stackData = []; // [ { x, y0, y1, color } ] per party
+            
+            // Helper to get y from percentage
+            const getY = (pct) => h - padding - (pct / 100) * drawH;
+
+            // Prepare paths
+            tCtx.globalAlpha = 0.8;
+            for(let pIdx = 0; pIdx < n.parties.length; pIdx++) {
+                const p = n.parties[pIdx];
+                tCtx.fillStyle = p.color;
+                tCtx.beginPath();
+                
+                // Top line
+                for(let i=0; i<history.length; i++) {
+                    const entry = history[i];
+                    // Sum previous parties support
+                    let prevSum = 0;
+                    for(let k=0; k<pIdx; k++) {
+                        const pp = n.parties[k];
+                        const ppData = entry.parties.find(d => d.name === pp.name);
+                        if(ppData) prevSum += ppData.support;
+                    }
+                    // Current support
+                    const pData = entry.parties.find(d => d.name === p.name);
+                    let curr = pData ? pData.support : 0;
+                    
+                    let yTop = getY(prevSum + curr);
+                    let x = padding + (i / (history.length - 1)) * drawW;
+                    
+                    if(i===0) tCtx.moveTo(x, yTop);
+                    else tCtx.lineTo(x, yTop);
+                }
+                
+                // Bottom line (reverse)
+                for(let i=history.length-1; i>=0; i--) {
+                    const entry = history[i];
+                    let prevSum = 0;
+                    for(let k=0; k<pIdx; k++) {
+                        const pp = n.parties[k];
+                        const ppData = entry.parties.find(d => d.name === pp.name);
+                        if(ppData) prevSum += ppData.support;
+                    }
+                    let yBot = getY(prevSum);
+                    let x = padding + (i / (history.length - 1)) * drawW;
+                    tCtx.lineTo(x, yBot);
+                }
+                
+                tCtx.closePath();
+                tCtx.fill();
+            }
+            tCtx.globalAlpha = 1.0;
+
+            // Grid & Axes
+            tCtx.strokeStyle = "#555";
             tCtx.lineWidth = 1;
             tCtx.beginPath();
             tCtx.moveTo(padding, padding);
-            tCtx.lineTo(padding, h-padding);
-            tCtx.lineTo(w-padding, h-padding);
+            tCtx.lineTo(padding, h - padding); // Y axis
+            tCtx.lineTo(w - padding, h - padding); // X axis
             tCtx.stroke();
             
+            // Text Labels (Year)
+            tCtx.fillStyle = "#aaa";
+            tCtx.font = "10px sans-serif";
+            tCtx.textAlign = "center";
+            // Start Year
+            tCtx.fillText(history[0].year, padding, h - 5);
+            // End Year
+            tCtx.fillText(history[history.length-1].year, w - padding, h - 5);
+            
+            // Legend
+            let lx = padding + 10;
+            let ly = 10;
             n.parties.forEach(p => {
-                tCtx.strokeStyle = p.color;
-                tCtx.lineWidth = 2;
-                tCtx.beginPath();
-                
-                history.forEach((entry, idx) => {
-                    const partyData = entry.parties.find(pd => pd.name === p.name);
-                    if (partyData) {
-                        const x = padding + (idx / (history.length - 1)) * drawW;
-                        const y = h - padding - (partyData.support / 100) * drawH;
-                        if (idx === 0) tCtx.moveTo(x, y);
-                        else tCtx.lineTo(x, y);
-                    }
-                });
-                tCtx.stroke();
+                tCtx.fillStyle = p.color;
+                tCtx.fillRect(lx, ly, 8, 8);
+                tCtx.fillStyle = "#ccc";
+                tCtx.textAlign = "left";
+                tCtx.fillText(p.name, lx + 12, ly + 7);
+                lx += tCtx.measureText(p.name).width + 20;
             });
+        }
+
+        // Supreme Court Visualization
+        const courtContainer = document.getElementById('us-court-section');
+        if (!courtContainer) {
+            const courtDiv = document.createElement('div');
+            courtDiv.id = 'us-court-section';
+            courtDiv.style.marginTop = '10px';
+            courtDiv.style.borderTop = '1px solid #555';
+            courtDiv.style.paddingTop = '5px';
+            courtDiv.innerHTML = '<h4>最高裁 (Supreme Court)</h4><div id="court-icons" style="display:flex; gap:5px; justify-content:center;"></div>';
+            
+            const polSection = document.getElementById('us-politics-section');
+            if(polSection) polSection.appendChild(courtDiv);
+        }
+        
+        if (n.supremeCourt) {
+            const iconsDiv = document.getElementById('court-icons');
+            if (iconsDiv) {
+                iconsDiv.innerHTML = '';
+                // Sort by ideology for visual grouping?
+                // Or just show seat by seat.
+                // Let's sort: Con, Lib
+                const sortedJustices = [...n.supremeCourt].sort((a,b) => a.ideology === "保守" ? -1 : 1);
+                
+                sortedJustices.forEach(j => {
+                    const icon = document.createElement('div');
+                    icon.style.width = '20px';
+                    icon.style.height = '20px';
+                    icon.style.borderRadius = '50%';
+                    // Color
+                    icon.style.background = j.ideology === "保守" ? '#e74c3c' : '#3498db';
+                    icon.style.border = '2px solid #222';
+                    icon.title = `${j.name} (${j.age.toFixed(0)}歳, ${j.ideology})`;
+                    iconsDiv.appendChild(icon);
+                });
+                
+                // Add Balance Text
+                const conCount = n.supremeCourt.filter(j => j.ideology === "保守").length;
+                const libCount = n.supremeCourt.filter(j => j.ideology === "リベラル").length;
+                const balanceText = document.createElement('div');
+                balanceText.style.width = '100%';
+                balanceText.style.textAlign = 'center';
+                balanceText.style.fontSize = '0.8em';
+                balanceText.style.marginTop = '3px';
+                balanceText.innerHTML = `<span style="color:#e74c3c">${conCount}</span> - <span style="color:#3498db">${libCount}</span>`;
+                iconsDiv.parentNode.appendChild(balanceText);
+            }
+        }
+        
+        // Economy Visualization
+        if (n.economy) {
+             let ecoDiv = document.getElementById('us-eco-status');
+             if (!ecoDiv) {
+                 ecoDiv = document.createElement('div');
+                 ecoDiv.id = 'us-eco-status';
+                 const polSection = document.getElementById('us-politics-section');
+                 if(polSection) polSection.insertBefore(ecoDiv, polSection.firstChild); // Top of politics
+             }
+             
+             let statusColor = "#ccc";
+             if (n.economy.status.includes("好況")) statusColor = "#2ecc71";
+             if (n.economy.status.includes("不況")) statusColor = "#e74c3c";
+             if (n.economy.status.includes("停滞")) statusColor = "#f1c40f";
+
+             ecoDiv.innerHTML = `
+                <div class="stat-row" style="margin-bottom:8px; border-bottom:1px solid #444; padding-bottom:5px;">
+                    <span>経済状況:</span> 
+                    <span style="color:${statusColor}; font-weight:bold;">${n.economy.status}</span>
+                    <span style="font-size:0.8em; color:#888;">(インフレ: ${(n.economy.inflation*100).toFixed(1)}%)</span>
+                </div>
+             `;
         }
     }
 }
