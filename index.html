@@ -200,6 +200,7 @@ if ('serviceWorker' in navigator) {
             <div class="stat-row"><span>国家体制:</span> <span id="n-struct"></span></div>
             <div class="stat-row"><span>主権者:</span> <span id="n-sov"></span></div>
             <div class="stat-row"><span>宗教:</span> <span id="n-religion"></span></div>
+            <div class="stat-row"><span>文化圏:</span> <span id="n-culture"></span></div>
             <div class="stat-row"><span>技術:</span> <span id="n-tech"></span></div>
             <div class="stat-row"><span>安定度:</span> <span id="n-stability"></span></div>
             <div class="stat-row"><span>統治安定度:</span> <span id="n-governance"></span></div>
@@ -1197,6 +1198,12 @@ class Nation {
         
         this.cities = [];
         this.history = [];
+        this.supportHistory = [];
+        this.partySystem = Math.random() < 0.4 ? 'TWO_PARTY' : 'MULTI_PARTY';
+
+        if (this.sysBroad === '民主主義') {
+            this.generateParties();
+        }
 
         // 初期領土
         if (x !== undefined && y !== undefined) {
@@ -1378,6 +1385,74 @@ class Nation {
             const jpFirst = ["織田", "豊臣", "徳川", "武田", "上杉", "毛利", "島津", "伊達"];
             const jpLast = ["信長", "秀吉", "家康", "信玄", "謙信", "元就", "義久", "政宗"];
             return jpFirst[Math.floor(Math.random() * jpFirst.length)] + jpLast[Math.floor(Math.random() * jpLast.length)];
+        }
+    }
+
+    generateParties() {
+        this.parties = [];
+        this.parliamentSize = 100;
+        
+        const colors = ['#3498db', '#e74c3c', '#f1c40f', '#2ecc71', '#9b59b6', '#34495e', '#e67e22', '#1abc9c'];
+        colors.sort(() => Math.random() - 0.5);
+        
+        if (this.partySystem === 'TWO_PARTY') {
+            // Two major parties
+            const supportA = 40 + Math.random() * 15;
+            const supportB = 35 + Math.random() * 15;
+            const supportC = Math.max(0, 100 - supportA - supportB);
+            
+            const kanjiNames = ['自由党', '民主党', '共和党', '国民党'];
+            const alphaNames = ['Liberals', 'Democrats', 'Republicans', 'Nationals'];
+            
+            const pool = this.cultureType === 'KANJI' ? [...kanjiNames] : [...alphaNames];
+            
+            const nameA = pool.splice(Math.floor(Math.random() * pool.length), 1)[0];
+            const nameB = pool.splice(Math.floor(Math.random() * pool.length), 1)[0];
+            
+            this.parties.push({ name: nameA, color: colors[0], support: supportA, seats: Math.round(supportA), ideology: 'Major' });
+            this.parties.push({ name: nameB, color: colors[1], support: supportB, seats: Math.round(supportB), ideology: 'Major' });
+            
+            if (supportC > 0) {
+                 this.parties.push({ name: (this.cultureType === 'KANJI' ? '諸派' : 'Others'), color: '#95a5a6', support: supportC, seats: Math.round(supportC), ideology: 'Minor' });
+            }
+        } else {
+            // Multi-Party System
+            const numParties = 3 + Math.floor(Math.random() * 3); // 3 to 5
+            let remainingSupport = 100;
+            
+            const kanjiNames = ['自由党', '社会党', '国民党', '民主党', '未来党', '改革党', '平和党', '環境党', '保守党'];
+            const alphaNames = ['Liberal Party', 'Socialists', 'National Party', 'Democrats', 'Future Party', 'Reform Party', 'Peace Party', 'Green Party', 'Conservatives'];
+            
+            const pool = this.cultureType === 'KANJI' ? [...kanjiNames] : [...alphaNames];
+
+            for (let i = 0; i < numParties; i++) {
+                if (pool.length === 0) break;
+                
+                let share;
+                if (i === numParties - 1) {
+                    share = remainingSupport;
+                } else {
+                    share = (Math.random() * (remainingSupport / 1.5)) + 5; 
+                }
+                remainingSupport -= share;
+                
+                const name = pool.splice(Math.floor(Math.random() * pool.length), 1)[0];
+                this.parties.push({ 
+                    name: name, 
+                    color: colors[i % colors.length], 
+                    support: share, 
+                    seats: Math.round(share),
+                    ideology: 'Generic' 
+                });
+            }
+        }
+        
+        // Normalize seats to 100
+        let totalSeats = this.parties.reduce((sum, p) => sum + p.seats, 0);
+        if (totalSeats !== 100) {
+            // Adjust largest party
+            const largest = this.parties.reduce((prev, curr) => prev.seats > curr.seats ? prev : curr);
+            largest.seats += (100 - totalSeats);
         }
     }
 
@@ -2107,6 +2182,44 @@ function handlePolitics(n) {
         n.updateName();
         log(`${oldName}は安定した統治を確立し、${n.name}として国家の正統性を主張し始めました。`, "log-peace");
         n.addHistory(`正統化: ${oldName} -> ${n.name}`);
+    }
+
+    // 政党支持率の変動と記録 (民主主義国向け、USシナリオのメイン国以外)
+    const isUSMain = (activeScenario === 'GRACEFUL_US' && n.id === nations[0].id);
+    if (n.sysBroad === '民主主義' && n.parties && n.parties.length > 0 && !isUSMain) {
+        // 支持率のランダム変動
+        n.parties.forEach(p => {
+            p.support += (Math.random() - 0.5) * 2.0;
+            p.support = Math.max(0, p.support);
+        });
+        
+        // 正規化
+        let total = n.parties.reduce((sum, p) => sum + p.support, 0);
+        if (total > 0) {
+            n.parties.forEach(p => p.support = (p.support / total) * 100);
+        }
+
+        // 議席更新 (簡易)
+        let remaining = n.parliamentSize;
+        n.parties.forEach(p => {
+            p.seats = Math.floor((p.support / 100) * n.parliamentSize);
+            remaining -= p.seats;
+        });
+        // 最大政党に余りを付与
+        let largest = n.parties.reduce((prev, curr) => prev.support > curr.support ? prev : curr);
+        largest.seats += remaining;
+
+        // 履歴記録 (1年に1回)
+        if (!n.lastHistoryYear) n.lastHistoryYear = 0;
+        if (year > n.lastHistoryYear) {
+            n.lastHistoryYear = year;
+            let historyEntry = { year: year, parties: [] };
+            n.parties.forEach(p => {
+                historyEntry.parties.push({ name: p.name, color: p.color, support: p.support });
+            });
+            n.supportHistory.push(historyEntry);
+            if (n.supportHistory.length > 100) n.supportHistory.shift();
+        }
     }
 
     // 追い詰められた宗主国による緊急併合 (生存戦略)
@@ -4138,6 +4251,7 @@ function updateNationPanel() {
     document.getElementById('n-sov').innerText = n.sovereign || '-';
 
     document.getElementById('n-religion').innerText = n.religion;
+    document.getElementById('n-culture').innerText = (n.cultureType === 'KANJI' ? '漢字文化圏' : 'アルファベット文化圏');
     document.getElementById('n-tech').innerText = TECH_LEVELS[n.tech];
     document.getElementById('n-stability').innerText = Math.floor(n.stability) + "%";
     document.getElementById('n-governance').innerText = Math.floor(n.governance);
@@ -4159,8 +4273,8 @@ function updateNationPanel() {
     // Domestic Politics Display
     let politicsDiv = document.getElementById('us-politics-section');
     
-    // If not graceful US or no parties, remove if exists
-    if (activeScenario !== 'GRACEFUL_US' || !n.parties) {
+    // If no parties, remove if exists
+    if (!n.parties || n.parties.length === 0) {
         if (politicsDiv) politicsDiv.remove();
     } else {
         // If exists, update content. If not, create.
@@ -4178,8 +4292,10 @@ function updateNationPanel() {
                 <h4 style="margin:5px 0; color:#ccc; font-size:0.9em;">議席分布 (全${n.parliamentSize}席)</h4>
                 <canvas id="parliament-chart" width="280" height="100" style="background:#222; margin-bottom:5px; border-radius:4px;"></canvas>
                 <div id="pol-party-list" style="margin-top:10px;"></div>
-                <h4 style="margin:10px 0 5px 0; color:#ccc; font-size:0.9em;">支持率推移 (過去100年)</h4>
-                <canvas id="support-trend-chart" width="280" height="100" style="background:#222; border:1px solid #444; border-radius:4px;"></canvas>
+                <div id="pol-history-section" style="display:none;">
+                    <h4 style="margin:10px 0 5px 0; color:#ccc; font-size:0.9em;">支持率推移 (過去100年)</h4>
+                    <canvas id="support-trend-chart" width="280" height="100" style="background:#222; border:1px solid #444; border-radius:4px;"></canvas>
+                </div>
             `;
             const historyBtn = document.getElementById('btn-history');
             if (historyBtn) {
@@ -4189,11 +4305,17 @@ function updateNationPanel() {
             }
         }
 
+        // Show/Hide History Section
+        const histSection = document.getElementById('pol-history-section');
+        if (histSection) {
+            histSection.style.display = (n.supportHistory && n.supportHistory.length > 1) ? 'block' : 'none';
+        }
+
         // Update dynamic content
         // President Info
-        if (n.president) {
-            const info = document.getElementById('pol-pres-info');
-            if (info) {
+        const info = document.getElementById('pol-pres-info');
+        if (info) {
+            if (n.president) {
                  const approvalColor = n.president.approval >= 60 ? '#2ecc71' : (n.president.approval < 40 ? '#e74c3c' : '#f1c40f');
                  const govStatus = n.isDividedGovernment ? '<span style="color:#e74c3c">ねじれ (Divided)</span>' : '<span style="color:#2ecc71">安定多数 (Unified)</span>';
                  
@@ -4203,6 +4325,13 @@ function updateNationPanel() {
                     <div class="stat-row"><span>任期:</span> <span>${n.president.term}期目</span></div>
                     <div class="stat-row"><span>議会状況:</span> <span>${govStatus}</span></div>
                     <div class="stat-row"><span>次期選挙:</span> <span>${n.electionYear}年 (中間: ${n.midtermYear}年)</span></div>
+                 `;
+            } else {
+                 // Standard Democracy
+                 const systemName = n.partySystem === 'TWO_PARTY' ? '二大政党制' : '多党制';
+                 info.innerHTML = `
+                    <div class="stat-row"><span>指導者:</span> <span style="font-weight:bold;">${n.leader}</span></div>
+                    <div class="stat-row"><span>政党制:</span> <span>${systemName}</span></div>
                  `;
             }
         }
@@ -4223,7 +4352,7 @@ function updateNationPanel() {
         }
     }
 
-    if (activeScenario === 'GRACEFUL_US' && n.parties) {
+    if (n.parties && n.parties.length > 0) {
 
         // Draw Parliament Chart
         const pCanvas = document.getElementById('parliament-chart');
