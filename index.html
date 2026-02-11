@@ -242,6 +242,7 @@ const COLORS = {
     LAND: '#3c4d3c',
     MOUNTAIN: '#4a4a4a',
     RIVER: '#2980b9',
+    MAJOR_RIVER: '#1f618d',
     SNOW: '#ecf0f1'
 };
 const RELIGIONS = ['太陽神教', '海霊信仰', '機械崇拝', '自然の秩序', '混沌', '虚無'];
@@ -324,7 +325,8 @@ function generatePoliticalSystem(currentTech) {
 let canvas, ctx, width, height;
 let currentScenario = 'BLITZKRIEG';
 let activeScenario = 'BLITZKRIEG'; // Scenario used for generation (latched)
-let grid = []; // 0:Water, 1:Land, 2:Mountain, 3:River
+let grid = []; // 0:Water, 1:Land, 2:Mountain, 3:River, 4:Major River
+let elevationGrid = []; // 0.0 - 1.0
 let ownerGrid = []; // ID of the nation owning this tile (-1 for none)
 let nations = [];
 let nationIdCounter = 0;
@@ -434,12 +436,70 @@ function initGrid(size) {
     width = size;
     height = size;
     grid = new Array(width * height).fill(0);
+    elevationGrid = new Array(width * height).fill(0);
     ownerGrid = new Array(width * height).fill(-1);
     continentMap = new Array(width * height).fill(-1);
     nations = [];
     isDrawing = true;
     year = 1;
     document.getElementById('log').innerHTML = '';
+}
+
+// Simple Value Noise 2D
+const noise2D = (function() {
+    const tableSize = 256;
+    const r = new Array(tableSize);
+    const permutation = new Array(tableSize * 2);
+
+    for (let i = 0; i < tableSize; i++) {
+        r[i] = Math.random();
+        permutation[i] = i;
+    }
+
+    for (let i = 0; i < tableSize; i++) {
+        const j = Math.floor(Math.random() * tableSize);
+        const temp = permutation[i];
+        permutation[i] = permutation[j];
+        permutation[j] = temp;
+        permutation[i + tableSize] = permutation[i];
+    }
+
+    function lerp(t, a, b) {
+        return a + t * (b - a);
+    }
+
+    function fade(t) {
+        return t * t * t * (t * (t * 6 - 15) + 10);
+    }
+
+    return function(x, y) {
+        const xi = Math.floor(x) & 255;
+        const yi = Math.floor(y) & 255;
+        const xf = x - Math.floor(x);
+        const yf = y - Math.floor(y);
+
+        const u = fade(xf);
+        const v = fade(yf);
+
+        const aa = r[permutation[permutation[xi] + yi]];
+        const ab = r[permutation[permutation[xi] + yi + 1]];
+        const ba = r[permutation[permutation[xi + 1] + yi]];
+        const bb = r[permutation[permutation[xi + 1] + yi + 1]];
+
+        return lerp(v, lerp(u, aa, ba), lerp(u, ab, bb));
+    };
+})();
+
+function fbm(x, y, octaves) {
+    let val = 0;
+    let amp = 0.5;
+    let freq = 1;
+    for(let i=0; i<octaves; i++) {
+        val += noise2D(x*freq, y*freq) * amp;
+        amp *= 0.5;
+        freq *= 2;
+    }
+    return val;
 }
 
 /**
@@ -903,7 +963,7 @@ function generateWorld() {
 }
 
 function generateTerrainFeatures() {
-    // 1. 海岸線からの距離マップを作成 (2パス・ディスタンス・トランスフォーム)
+    // 1. 標高マップの生成 (距離 + ノイズ)
     let distMap = new Array(width * height).fill(width * height);
     
     // パス1: 左上から右下へ
@@ -931,94 +991,123 @@ function generateTerrainFeatures() {
         }
     }
 
-    // 2. 山脈の生成 (島の中央部、つまり距離が極大になる付近に沿って生成)
-    for (let y = 1; y < height - 1; y++) {
-        for (let x = 1; x < width - 1; x++) {
-            let idx = y * width + x;
-            if (grid[idx] === 1 && distMap[idx] >= 4) {
-                let isLocalMax = true;
-                let val = distMap[idx];
-                for (let dy = -1; dy <= 1; dy++) {
-                    for (let dx = -1; dx <= 1; dx++) {
-                        if (dx === 0 && dy === 0) continue;
-                        if (distMap[(y + dy) * width + (x + dx)] > val) {
-                            isLocalMax = false;
-                            break;
-                        }
-                    }
-                    if (!isLocalMax) break;
-                }
+    let maxDist = 0;
+    for(let i=0; i<width*height; i++) if(distMap[i] > maxDist) maxDist = distMap[i];
+    if(maxDist === 0) maxDist = 1;
+
+    const noiseScale = 0.05; // Adjust for map size
+    const seedX = Math.random() * 1000;
+    const seedY = Math.random() * 1000;
+
+    for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+            const idx = y * width + x;
+            if (grid[idx] === 0) {
+                elevationGrid[idx] = 0;
+            } else {
+                // Base elevation from distance (conical islands)
+                let base = distMap[idx] / maxDist;
                 
-                if (isLocalMax && Math.random() < 0.8) {
-                    grid[idx] = 2; // 山
-                    // 山脈を広げる (山脈の方向に慣性を持たせる)
-                    let cx = x, cy = y;
-                    let lastDx = 0, lastDy = 0;
-                    let rangeLen = 5 + Math.random() * 20;
-                    for (let len = 0; len < rangeLen; len++) {
-                        let candidates = [];
-                        [[0, 1], [0, -1], [1, 0], [-1, 0], [1, 1], [1, -1], [-1, 1], [-1, -1]].forEach(([dx, dy]) => {
-                            let nx = cx + dx, ny = cy + dy;
-                            if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
-                                let nIdx = ny * width + nx;
-                                if (grid[nIdx] === 1 && distMap[nIdx] >= 3) {
-                                    // 前回の方向と同じ方向を優先
-                                    let weight = (dx === lastDx && dy === lastDy) ? 5 : 1;
-                                    for(let w=0; w<weight; w++) candidates.push({x: nx, y: ny, dx, dy});
-                                }
-                            }
-                        });
-                        if (candidates.length === 0) break;
-                        let next = candidates[Math.floor(Math.random() * candidates.length)];
-                        cx = next.x; cy = next.y;
-                        lastDx = next.dx; lastDy = next.dy;
-                        grid[cy * width + cx] = 2;
-                    }
-                }
+                // Add noise
+                let nVal = fbm(x * noiseScale + seedX, y * noiseScale + seedY, 3);
+                // Normalize noise roughly to 0-1
+                nVal = (nVal + 1) / 2;
+                
+                // Mix: 60% distance, 40% noise
+                elevationGrid[idx] = base * 0.6 + nVal * 0.4;
             }
         }
     }
 
-    // 3. 川の生成 (山から海へ、勾配を下る)
-    let riverOrigins = [];
-    for (let i = 0; i < width * height; i++) {
-        if (grid[i] === 2 && Math.random() < 0.3) riverOrigins.push(i);
-    }
+    // 2. 山脈の生成 (高標高地点)
+    // 標高の上位X%を山にする
+    let landIndices = [];
+    for(let i=0; i<width*height; i++) if(grid[i] !== 0) landIndices.push(i);
+    landIndices.sort((a,b) => elevationGrid[b] - elevationGrid[a]);
     
-    riverOrigins.forEach(origin => {
-        let cx = origin % width;
-        let cy = Math.floor(origin / width);
-        let path = [origin];
-        let life = 200;
-        while (life > 0) {
-            let candidates = [];
-            let currentH = distMap[cy * width + cx];
+    // Top 10% -> Mountain
+    const mountainCount = Math.floor(landIndices.length * 0.1);
+    for(let i=0; i<mountainCount; i++) {
+        grid[landIndices[i]] = 2; // Mountain
+    }
+
+    // 3. 河川の生成 (水理侵食シミュレーション)
+    let flowMap = new Array(width * height).fill(0);
+    const drops = Math.floor(landIndices.length * 2.0); // Raindrops
+
+    for (let i = 0; i < drops; i++) {
+        // Random start point (weighted by elevation?) or just random land
+        // Higher elevation is more likely to start a river
+        let startIdx = landIndices[Math.floor(Math.random() * (landIndices.length / 2))]; // Top 50% elevation
+        
+        let cx = startIdx % width;
+        let cy = Math.floor(startIdx / width);
+        let currIdx = startIdx;
+        let path = [];
+        
+        while (true) {
+            path.push(currIdx);
+            flowMap[currIdx]++;
             
-            [[0, 1], [0, -1], [1, 0], [-1, 0]].forEach(([dx, dy]) => {
-                let nx = cx + dx, ny = cy + dy;
-                if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
-                    let idx = ny * width + nx;
-                    if (path.includes(idx)) return;
-                    let h = distMap[idx];
-                    if (h <= currentH) {
-                        candidates.push({x: nx, y: ny, h: h, idx: idx});
+            // Find lowest neighbor
+            let lowestIdx = -1;
+            let minH = elevationGrid[currIdx];
+            
+            // 8 neighbors for better flow
+            for (let dy = -1; dy <= 1; dy++) {
+                for (let dx = -1; dx <= 1; dx++) {
+                    if (dx === 0 && dy === 0) continue;
+                    const nx = cx + dx;
+                    const ny = cy + dy;
+                    if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
+                        const nIdx = ny * width + nx;
+                        // Determine height: if water, height is -1 (flows into sea)
+                        let h = (grid[nIdx] === 0) ? -1 : elevationGrid[nIdx];
+                        
+                        if (h < minH) {
+                            minH = h;
+                            lowestIdx = nIdx;
+                        }
                     }
                 }
-            });
-
-            if (candidates.length === 0) break;
-            // 勾配が最も急な方向を優先しつつ、少しランダム性を入れる
-            candidates.sort((a, b) => a.h - b.h);
-            let next = candidates[0];
-            if (Math.random() < 0.4 && candidates.length > 1) next = candidates[Math.floor(Math.random() * Math.min(candidates.length, 3))];
+            }
             
-            cx = next.x; cy = next.y;
-            path.push(next.idx);
-            if (grid[next.idx] === 0) break; // 海に到達
-            if (grid[next.idx] === 1) grid[next.idx] = 3; // 平地なら川にする
-            life--;
+            if (lowestIdx === -1) {
+                // Local minimum (lake?), stop
+                break;
+            }
+            
+            if (grid[lowestIdx] === 0) {
+                // Reached sea
+                break; 
+            }
+            
+            currIdx = lowestIdx;
+            cx = currIdx % width;
+            cy = Math.floor(currIdx / width);
+            
+            if (path.length > 200) break; // Infinite loop safety
         }
-    });
+    }
+
+    // Assign Rivers based on flow
+    // Normalize flow?
+    // Thresholds:
+    // Flow > 20 -> Major River
+    // Flow > 5 -> River
+    
+    // Scale thresholds by map size/raindrops
+    // Average flow?
+    
+    for (let i = 0; i < width * height; i++) {
+        if (grid[i] === 0 || grid[i] === 2) continue; // Skip water and mountains (mountains can have rivers start, but usually stay mountains)
+        
+        if (flowMap[i] > 20) {
+            grid[i] = 4; // Major River
+        } else if (flowMap[i] > 5) {
+            grid[i] = 3; // River
+        }
+    }
 }
 
 /**
@@ -1579,9 +1668,31 @@ function renderMap() {
             const owner = ownerGrid[i];
             
             let color = COLORS.WATER;
-            if (type === 1) color = COLORS.LAND;
+            if (type === 1) {
+                // Elevation gradient for land
+                if (mapMode === 'terrain') {
+                    const h = elevationGrid[i];
+                    // 0.0 (Green) -> 0.5 (Dark Green) -> 0.8 (Brown) -> 1.0 (White)
+                    if (h < 0.3) {
+                        const v = Math.floor(h * 3.3 * 50);
+                        color = `rgb(${50-v}, ${100+v}, ${50-v})`;
+                    } else if (h < 0.6) {
+                        const v = Math.floor((h-0.3) * 3.3 * 50);
+                        color = `rgb(${100+v}, ${150-v}, 50)`;
+                    } else if (h < 0.8) {
+                        const v = Math.floor((h-0.6) * 5 * 100);
+                        color = `rgb(${160+v}, ${140+v}, 100)`;
+                    } else {
+                        const v = Math.floor((h-0.8) * 5 * 155);
+                        color = `rgb(${200+v}, ${200+v}, ${200+v})`;
+                    }
+                } else {
+                    color = COLORS.LAND;
+                }
+            }
             if (type === 2) color = COLORS.MOUNTAIN;
             if (type === 3) color = COLORS.RIVER;
+            if (type === 4) color = COLORS.MAJOR_RIVER;
 
             // 国の色オーバーレイ
             if (owner !== -1 && !isDrawing) {
@@ -1592,17 +1703,10 @@ function renderMap() {
                         
                         // Detailed Domestic Politics Mode
                         if (activeScenario === 'GRACEFUL_US' && nat.id === nations[0].id) {
-                            // Find nearest city to determine "State" color
-                            // This is expensive per pixel, so we should optimize or limit resolution.
-                            // However, grid is small (128x128), so linear search over ~50 cities is ~16k * 50 = 800k ops. 
-                            // Might be slow on mobile. 
-                            // Optimization: Pre-calculate this or simple distance check
-                            
+                            // Find nearest city
                             let bestCity = null;
                             let minDist = Infinity;
                             
-                            // Simple optimization: check only if we are on land
-                            // To speed up, we can use a pre-computed map or just iterate
                             for (const c of nat.cities) {
                                 const dx = (c.tileIdx % width) - x;
                                 const dy = Math.floor(c.tileIdx / width) - y;
@@ -1610,12 +1714,11 @@ function renderMap() {
                                 if (dist < minDist) {
                                     minDist = dist;
                                     bestCity = c;
-                                    if (minDist < 10) break; // Good enough
+                                    if (minDist < 10) break; 
                                 }
                             }
                             
                             if (bestCity && bestCity.partySupport) {
-                                // Find dominant party
                                 let maxSupport = -1;
                                 let dominantColor = nat.color;
                                 nat.parties.forEach(p => {
@@ -1627,14 +1730,13 @@ function renderMap() {
                                 fillColor = dominantColor;
                             }
                         } else {
-                            // Standard Political Mode
                             if (nat.isPuppet && nat.masterId !== -1) {
                                 const master = nations.find(m => m.id === nat.masterId);
                                 if (master) fillColor = master.color;
                             }
                         }
 
-                        // 国の色をベースにするが、地形も見せる (透過させる)
+                        // 国の色をベースにするが、地形も見せる
                         ctx.globalAlpha = 0.6;
                         ctx.fillStyle = fillColor;
                         ctx.fillRect(offsetX + x*TILE_SIZE, offsetY + y*TILE_SIZE, TILE_SIZE, TILE_SIZE);
@@ -1647,12 +1749,21 @@ function renderMap() {
                     
                     // 山や川の場合は装飾 (常に表示)
                     if (type === 2) { // 山
-                        ctx.fillStyle = "rgba(0,0,0,0.5)";
-                        ctx.fillRect(offsetX + x*TILE_SIZE+1, offsetY + y*TILE_SIZE+1, TILE_SIZE-2, TILE_SIZE-2);
+                        // Draw mountain peak
+                        ctx.fillStyle = "rgba(20,20,20,0.6)";
+                        ctx.beginPath();
+                        ctx.moveTo(offsetX + x*TILE_SIZE, offsetY + (y+1)*TILE_SIZE);
+                        ctx.lineTo(offsetX + (x+0.5)*TILE_SIZE, offsetY + y*TILE_SIZE);
+                        ctx.lineTo(offsetX + (x+1)*TILE_SIZE, offsetY + (y+1)*TILE_SIZE);
+                        ctx.fill();
                     }
                     else if (type === 3) { // 川
-                        ctx.fillStyle = "rgba(100,200,255,0.6)";
+                        ctx.fillStyle = "rgba(100,200,255,0.8)";
                         ctx.fillRect(offsetX + x*TILE_SIZE + TILE_SIZE/3, offsetY + y*TILE_SIZE, TILE_SIZE/3, TILE_SIZE);
+                    }
+                    else if (type === 4) { // 大河
+                        ctx.fillStyle = "#1f618d";
+                        ctx.fillRect(offsetX + x*TILE_SIZE, offsetY + y*TILE_SIZE, TILE_SIZE, TILE_SIZE);
                     }
                 }
             } else {
@@ -2091,7 +2202,8 @@ function getNaturalTerritory(ownerId, seedIndices, targetCount) {
                     // 地形コスト
                     if (type === 2) moveCost += 8; // 山岳は越えにくい
                     if (type === 3) moveCost += 4; // 川は越えにくい
-                    if (prevType === 3 && type !== 3) moveCost += 4; // 川渡り
+                    if (type === 4) moveCost += 12; // 大河は非常に越えにくい
+                    if ((prevType === 3 || prevType === 4) && (type !== 3 && type !== 4)) moveCost += 6; // 川渡りコスト
 
                     const newCost = current.cost + moveCost;
                     
@@ -3961,6 +4073,7 @@ function stealTerritory(winner, loser) {
             let difficulty = 1;
             if (terrain === 2) difficulty = 4; // 山岳: 1/4の確率
             if (terrain === 3) difficulty = 2; // 河川: 1/2の確率
+            if (terrain === 4) difficulty = 6; // 大河: 1/6の確率
             
             if (Math.random() > (1 / difficulty)) return; // 失敗（進軍停止）
 
