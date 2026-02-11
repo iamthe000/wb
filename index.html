@@ -1295,6 +1295,8 @@ class Nation {
                 if (this.sysDetailed === "革命政府") suffix = "革命政府";
                 if (this.sysDetailed === "臨時政府") suffix = "臨時政府";
                 if (this.sysDetailed === "正統政府") suffix = "正統政府";
+                if (this.sysDetailed === "暫定政府") suffix = "暫定政府";
+                if (this.sysDetailed === "暫定統治機構") suffix = "暫定統治機構";
 
                 if (this.sysBroad === '民主主義' && this.regimeNumber > 1) {
                     proposedName = this.baseName + suffix + "第" + this.regimeNumber + "政";
@@ -2340,7 +2342,9 @@ function triggerCityRebellion(n, cities) {
         { name: "立憲派", gov: "革命政府" },
         { name: "正統政府", gov: "正統政府" },
         { name: "救国戦線", gov: "軍事評議会制" },
-        { name: "人民委員会", gov: "革命政府" }
+        { name: "人民委員会", gov: "革命政府" },
+        { name: "暫定政府", gov: "暫定政府" },
+        { name: "暫定統治機構", gov: "暫定統治機構" }
     ];
     
     // 特別な名称: 共和国第n政 (親が民主制の場合)
@@ -2355,10 +2359,10 @@ function triggerCityRebellion(n, cities) {
         const type = rebelTypes[Math.floor(Math.random() * rebelTypes.length)];
         rebel.sysDetailed = type.gov;
         // Adjust broad/sovereign for special types
-        if (type.gov === '革命政府' || type.gov === '臨時政府') {
+        if (type.gov === '革命政府' || type.gov === '臨時政府' || type.gov === '暫定政府') {
             rebel.sysBroad = '民主主義';
             rebel.sovereign = '国民';
-        } else if (type.gov === '軍事評議会制') {
+        } else if (type.gov === '軍事評議会制' || type.gov === '暫定統治機構') {
             rebel.sysBroad = '権威主義';
             rebel.sovereign = '軍部';
         } else if (type.gov === '正統政府') {
