@@ -1627,7 +1627,8 @@ function loop() {
     
     if (!isDrawing && !isPaused) {
         frameCounter++;
-        if (frameCounter >= (11 - simSpeed)) {
+        let speedMod = (activeScenario === 'QUIET_SPARKS') ? 5 : 1;
+        if (frameCounter >= (11 - simSpeed) * speedMod) {
             frameCounter = 0;
             simulateTick();
             year++;
@@ -3001,9 +3002,11 @@ function simulateTick() {
         highTensionDuration = 0;
     }
 
-    if (highTensionDuration > 1000) {
+    let tensionThreshold = (activeScenario === 'QUIET_SPARKS') ? 10 : 1000;
+    if (highTensionDuration > tensionThreshold) {
         // 全世界的な和平交渉 (必ずしも平和にはならない)
-        log("千年戦争の疲弊: 世界中で厭戦気分が高まり、各国で和平交渉が開始されました。", "log-peace");
+        let eventName = (activeScenario === 'QUIET_SPARKS') ? "10年戦争の弊害" : "千年戦争の疲弊";
+        log(`${eventName}: 世界中で厭戦気分が高まり、各国で和平交渉が開始されました。`, "log-peace");
         
         // 交渉済みペアを記録 (A-BとB-Aで二重処理しないため)
         const negotiatedPairs = new Set();
