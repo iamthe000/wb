@@ -75,6 +75,12 @@ if ('serviceWorker' in navigator) {
     <button onclick="document.getElementById('history-modal').style.display='none'" style="margin-top:15px;">閉じる</button>
 </div>
 
+<div id="relations-modal" style="display:none; position:fixed; top:50%; left:50%; transform:translate(-50%, -50%); background:#222; border:1px solid #444; padding:20px; z-index:1000; width:90%; max-width:500px; max-height:80vh; overflow-y:auto; box-shadow: 0 0 20px rgba(0,0,0,0.8);">
+    <h2 style="margin-top:0; border-bottom:1px solid #555; padding-bottom:5px;">国際関係</h2>
+    <div id="relations-list" style="font-size:0.9em; line-height:1.4;"></div>
+    <button onclick="document.getElementById('relations-modal').style.display='none'" style="margin-top:15px; width:100%;">閉じる</button>
+</div>
+
 <div id="ranking-modal" style="display:none; position:fixed; top:50%; left:50%; transform:translate(-50%, -50%); background:#222; border:1px solid #444; padding:20px; z-index:1000; width:90%; max-width:800px; max-height:80vh; overflow-y:auto; box-shadow: 0 0 20px rgba(0,0,0,0.8);">
     <h2 style="margin-top:0; border-bottom:1px solid #555; padding-bottom:5px;">国力ランキング</h2>
     <div id="ranking-content"></div>
@@ -214,6 +220,7 @@ if ('serviceWorker' in navigator) {
             <div class="stat-row"><span>海軍力:</span> <span id="n-ships"></span></div>
             <div class="stat-row"><span>軍の質:</span> <span id="n-qual"></span></div>
             <button id="btn-history" style="margin-top:10px; background:#5d4037;">国家系譜を見る</button>
+            <button id="btn-relations" style="margin-top:5px; background:#2c3e50;">🌍 国際関係</button>
         </div>
 
         <div class="panel">
@@ -531,6 +538,10 @@ function setupInput() {
         document.getElementById('history-modal').style.display = 'block';
     });
 
+    document.getElementById('btn-relations').addEventListener('click', () => {
+        openRelationsModal();
+    });
+
     document.getElementById('btn-rulebook').addEventListener('click', () => {
         document.getElementById('rulebook-modal').style.display = 'block';
     });
@@ -538,6 +549,97 @@ function setupInput() {
     document.getElementById('btn-ranking').addEventListener('click', () => {
         openRankingModal();
     });
+}
+
+function openRelationsModal() {
+    if (selectedNationId === -1) return;
+    const n = nations.find(nat => nat.id === selectedNationId);
+    if (!n) return;
+
+    const list = document.getElementById('relations-list');
+    list.innerHTML = '';
+    
+    // Sort logic
+    const targets = nations.filter(t => t.id !== n.id && !t.isDead);
+    
+    targets.sort((a, b) => {
+        // Priority: War > Master > Puppet > Relation(Low->High)
+        const aWar = n.atWarWith.includes(a.id) ? 1 : 0;
+        const bWar = n.atWarWith.includes(b.id) ? 1 : 0;
+        if (aWar !== bWar) return bWar - aWar;
+        
+        const aMaster = (n.isPuppet && n.masterId === a.id) ? 1 : 0;
+        const bMaster = (n.isPuppet && n.masterId === b.id) ? 1 : 0;
+        if (aMaster !== bMaster) return bMaster - aMaster;
+
+        const aPuppet = (a.isPuppet && a.masterId === n.id) ? 1 : 0;
+        const bPuppet = (b.isPuppet && b.masterId === n.id) ? 1 : 0;
+        if (aPuppet !== bPuppet) return bPuppet - aPuppet;
+
+        const aRel = n.relations[a.id] || 0;
+        const bRel = n.relations[b.id] || 0;
+        return aRel - bRel; // Low relations first
+    });
+
+    if (targets.length === 0) {
+        list.innerHTML = '<div style="color:#aaa; text-align:center;">他国は存在しません。</div>';
+        document.getElementById('relations-modal').style.display = 'block';
+        return;
+    }
+
+    targets.forEach(t => {
+        const item = document.createElement('div');
+        item.style.marginBottom = "8px";
+        item.style.padding = "8px";
+        item.style.backgroundColor = "#333";
+        item.style.borderRadius = "4px";
+        item.style.display = "flex";
+        item.style.alignItems = "center";
+        item.style.justifyContent = "space-between";
+
+        const relVal = Math.floor(n.relations[t.id] || 0);
+        let statusText = "";
+        let statusColor = "#ccc";
+        let relColor = "#ccc";
+
+        // Status Logic
+        if (n.atWarWith.includes(t.id)) {
+            statusText = "交戦中";
+            statusColor = "#ff6b6b";
+            item.style.border = "1px solid #e74c3c";
+        } else if (n.isPuppet && n.masterId === t.id) {
+            statusText = "宗主国";
+            statusColor = "#f1c40f";
+        } else if (t.isPuppet && t.masterId === n.id) {
+            statusText = "傀儡国";
+            statusColor = "#2ecc71";
+        } else {
+            if (relVal >= 50) statusText = "友好";
+            else if (relVal <= -50) statusText = "敵対";
+            else statusText = "中立";
+        }
+
+        // Relation Color
+        if (relVal > 0) relColor = `rgb(${255 - relVal*2.5}, 255, ${255 - relVal*2.5})`; // White to Green
+        else relColor = `rgb(255, ${255 + relVal*2.5}, ${255 + relVal*2.5})`; // White to Red
+
+        item.innerHTML = `
+            <div style="flex: 1;">
+                <div style="font-weight:bold; color:${t.color}; font-size:1.0em;">${t.name}</div>
+                <div style="font-size:0.8em; color:#aaa;">GDP: ${formatNum(t.gdp)} | 軍事: ${formatNum(t.getMilitaryPower())}</div>
+            </div>
+            <div style="text-align:right;">
+                <div style="font-weight:bold; color:${statusColor}; font-size:0.9em; margin-bottom:2px;">${statusText}</div>
+                <div style="font-size:0.8em; color:${relColor}; background:#222; padding:2px 5px; border-radius:3px; display:inline-block; min-width:40px; text-align:center;">
+                    ${relVal > 0 ? "+" : ""}${relVal}
+                </div>
+            </div>
+        `;
+
+        list.appendChild(item);
+    });
+
+    document.getElementById('relations-modal').style.display = 'block';
 }
 
 function openRankingModal() {
