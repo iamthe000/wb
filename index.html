@@ -2046,6 +2046,67 @@ function declareIndependence(n) {
     }
 }
 
+/**
+ * 自然な国境生成 (Dijkstra法による領土拡張)
+ */
+function getNaturalTerritory(ownerId, seedIndices, targetCount) {
+    const claimed = new Set();
+    // 簡易優先度付きキュー (コスト順にソート)
+    let frontier = []; 
+    const visitedCost = new Map(); // idx -> cost
+
+    seedIndices.forEach(idx => {
+        frontier.push({idx: idx, cost: 0});
+        visitedCost.set(idx, 0);
+    });
+
+    while (frontier.length > 0 && claimed.size < targetCount) {
+        // コストが低い順に取り出す (末尾からpopするために降順ソート)
+        frontier.sort((a, b) => b.cost - a.cost);
+        const current = frontier.pop();
+        
+        if (claimed.has(current.idx)) continue;
+        claimed.add(current.idx);
+
+        const cx = current.idx % width;
+        const cy = Math.floor(current.idx / width);
+        const neighbors = [[0,1],[0,-1],[1,0],[-1,0]];
+        // 方向バイアスを避けるためシャッフル
+        neighbors.sort(() => Math.random() - 0.5);
+
+        for (const [dx, dy] of neighbors) {
+            const nx = cx + dx;
+            const ny = cy + dy;
+            
+            if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
+                const nIdx = ny * width + nx;
+                
+                // 同じ国の領土であり、未取得の場合のみ
+                if (ownerGrid[nIdx] === ownerId && !claimed.has(nIdx)) {
+                    let moveCost = 1 + Math.random(); // 基礎コスト + ランダム性
+                    
+                    const type = grid[nIdx];
+                    const prevType = grid[current.idx];
+
+                    // 地形コスト
+                    if (type === 2) moveCost += 8; // 山岳は越えにくい
+                    if (type === 3) moveCost += 4; // 川は越えにくい
+                    if (prevType === 3 && type !== 3) moveCost += 4; // 川渡り
+
+                    const newCost = current.cost + moveCost;
+                    
+                    if (!visitedCost.has(nIdx) || newCost < visitedCost.get(nIdx)) {
+                        visitedCost.set(nIdx, newCost);
+                        frontier.push({idx: nIdx, cost: newCost});
+                    }
+                }
+            }
+        }
+    }
+    
+    return Array.from(claimed);
+}
+
 function grantIndependence(n, city) {
     const newNation = new Nation();
     newNation.baseName = n.baseName;
@@ -2085,25 +2146,16 @@ function grantIndependence(n, city) {
     newNation.tech = n.tech;
     newNation.religion = n.religion;
 
-    // 領土と都市の委譲
-    const radius = 6;
-    const cx = city.tileIdx % width;
-    const cy = Math.floor(city.tileIdx / width);
-    
-    for (let dy = -radius; dy <= radius; dy++) {
-        for (let dx = -radius; dx <= radius; dx++) {
-            const nx = cx + dx;
-            const ny = cy + dy;
-            if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
-                const idx = ny * width + nx;
-                if (ownerGrid[idx] === n.id) {
-                    ownerGrid[idx] = newNation.id;
-                    newNation.tiles.push(idx);
-                    n.tiles = n.tiles.filter(t => t !== idx);
-                }
-            }
-        }
-    }
+    // 領土と都市の委譲 (自然な国境)
+    const targetSize = 130;
+    const rebelTiles = getNaturalTerritory(n.id, [city.tileIdx], targetSize);
+    const rebelTileSet = new Set(rebelTiles);
+
+    rebelTiles.forEach(idx => {
+        ownerGrid[idx] = newNation.id;
+        newNation.tiles.push(idx);
+    });
+    n.tiles = n.tiles.filter(t => !rebelTileSet.has(t));
     
     city.nationId = newNation.id;
     newNation.cities.push(city);
@@ -2218,27 +2270,22 @@ function triggerCityRebellion(n, cities) {
     rebel.tech = n.tech;
     rebel.religion = n.religion;
     
-    // 領土と都市の委譲
+    // 領土と都市の委譲 (自然な国境)
+    const targetPerCity = 130;
+    const totalTarget = cities.length * targetPerCity;
+    const seedIndices = cities.map(c => c.tileIdx);
+    
+    const rebelTiles = getNaturalTerritory(n.id, seedIndices, totalTarget);
+    const rebelTileSet = new Set(rebelTiles);
+
+    rebelTiles.forEach(idx => {
+        ownerGrid[idx] = rebel.id;
+        rebel.tiles.push(idx);
+    });
+    n.tiles = n.tiles.filter(t => !rebelTileSet.has(t));
+
+    // 都市の所属変更
     cities.forEach(city => {
-        const cityIdx = city.tileIdx;
-        const cx = cityIdx % width;
-        const cy = Math.floor(cityIdx / width);
-        const radius = 6;
-        
-        for (let dy = -radius; dy <= radius; dy++) {
-            for (let dx = -radius; dx <= radius; dx++) {
-                const nx = cx + dx;
-                const ny = cy + dy;
-                if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
-                    const idx = ny * width + nx;
-                    if (ownerGrid[idx] === n.id) {
-                        ownerGrid[idx] = rebel.id;
-                        rebel.tiles.push(idx);
-                        n.tiles = n.tiles.filter(t => t !== idx);
-                    }
-                }
-            }
-        }
         city.nationId = rebel.id;
         rebel.cities.push(city);
     });
