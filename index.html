@@ -563,7 +563,7 @@ function openRelationsModal() {
     const targets = nations.filter(t => t.id !== n.id && !t.isDead);
     
     targets.sort((a, b) => {
-        // Priority: War > Master > Puppet > Relation(Low->High)
+        // Priority: War > Master > Puppet > Ally > Relation(Low->High)
         const aWar = n.atWarWith.includes(a.id) ? 1 : 0;
         const bWar = n.atWarWith.includes(b.id) ? 1 : 0;
         if (aWar !== bWar) return bWar - aWar;
@@ -575,6 +575,10 @@ function openRelationsModal() {
         const aPuppet = (a.isPuppet && a.masterId === n.id) ? 1 : 0;
         const bPuppet = (b.isPuppet && b.masterId === n.id) ? 1 : 0;
         if (aPuppet !== bPuppet) return bPuppet - aPuppet;
+
+        const aAlly = n.allies.includes(a.id) ? 1 : 0;
+        const bAlly = n.allies.includes(b.id) ? 1 : 0;
+        if (aAlly !== bAlly) return bAlly - aAlly;
 
         const aRel = n.relations[a.id] || 0;
         const bRel = n.relations[b.id] || 0;
@@ -613,6 +617,10 @@ function openRelationsModal() {
         } else if (t.isPuppet && t.masterId === n.id) {
             statusText = "傀儡国";
             statusColor = "#2ecc71";
+        } else if (n.allies.includes(t.id)) {
+            statusText = "同盟国";
+            statusColor = "#00cec9";
+            item.style.border = "1px solid #00cec9";
         } else {
             if (relVal >= 50) statusText = "友好";
             else if (relVal <= -50) statusText = "敵対";
@@ -1094,6 +1102,7 @@ class Nation {
         this.isPuppet = false;
         this.masterId = -1;
         this.puppetSince = 0;
+        this.allies = []; // List of allied nation IDs
         
         this.cities = [];
         this.history = [];
@@ -3206,6 +3215,30 @@ function simulateTick() {
         // 関係値初期化
         if (n.relations[target.id] === undefined) n.relations[target.id] = 0;
 
+        // 同盟の形成と維持
+        if (!n.isPuppet && !target.isPuppet) {
+            // 同盟形成 (高関係かつ未同盟)
+            if (!n.allies.includes(target.id) && n.relations[target.id] > 80 && !n.atWarWith.includes(target.id)) {
+                // 共通の敵がいると確率アップ
+                let commonEnemy = false;
+                n.atWarWith.forEach(e => {
+                    if (target.atWarWith.includes(e)) commonEnemy = true;
+                });
+                
+                let chance = commonEnemy ? 0.05 : 0.005;
+                if (Math.random() < chance) {
+                    formAlliance(n, target);
+                }
+            }
+            
+            // 同盟破棄 (関係悪化)
+            if (n.allies.includes(target.id)) {
+                if (n.relations[target.id] < 0 || n.atWarWith.includes(target.id)) {
+                    breakAlliance(n, target);
+                }
+            }
+        }
+
         // 関係変動要因 (より過激に)
         let change = (Math.random() - 0.5) * 5; 
         if (n.religion === target.religion) change += 5;
@@ -3274,6 +3307,9 @@ function simulateTick() {
                 if (n.isPuppet && n.masterId === target.id) return;
                 // 主人は傀儡国を攻撃しない
                 if (target.isPuppet && target.masterId === n.id) return;
+                // 同盟国には攻撃しない (関係が極悪でない限り)
+                if (n.allies.includes(target.id) && n.relations[target.id] > -50) return;
+
                 declareWar(n, target);
             }
         } else if (activeScenario === 'QUIET_SPARKS' && isColdWar && n.relations[target.id] < -60 && (neighbor || canNavalInvade)) {
@@ -3302,6 +3338,9 @@ function simulateTick() {
                 if (n.isPuppet && n.masterId === target.id) return;
                 // 主人は傀儡国を攻撃しない
                 if (target.isPuppet && target.masterId === n.id) return;
+                // 同盟国には攻撃しない
+                if (n.allies.includes(target.id)) return;
+
                 log(`野心: ${n.name}は${target.name}への領土拡大の好機を見出しました！`, "log-war");
                 declareWar(n, target);
             }
@@ -3383,6 +3422,26 @@ function simulateTick() {
             });
         }
     });
+}
+
+function formAlliance(n1, n2) {
+    if (n1.allies.includes(n2.id)) return;
+    n1.allies.push(n2.id);
+    n2.allies.push(n1.id);
+    
+    log(`同盟締結: ${n1.name}と${n2.name}は軍事同盟を締結しました。`, "log-peace");
+    n1.addHistory(`同盟: ${n2.name}と締結`);
+    n2.addHistory(`同盟: ${n1.name}と締結`);
+}
+
+function breakAlliance(n1, n2) {
+    if (!n1.allies.includes(n2.id)) return;
+    n1.allies = n1.allies.filter(id => id !== n2.id);
+    n2.allies = n2.allies.filter(id => id !== n1.id);
+    
+    log(`同盟破棄: ${n1.name}と${n2.name}の同盟関係は解消されました。`, "log-war");
+    n1.addHistory(`同盟破棄: ${n2.name}との関係解消`);
+    n2.addHistory(`同盟破棄: ${n1.name}との関係解消`);
 }
 
 function isNeighbor(n1, n2) {
@@ -3468,6 +3527,25 @@ function declareWar(n1, n2) {
                 puppet.atWarWith.push(n1.id);
                 if (!n1.atWarWith.includes(puppet.id)) n1.atWarWith.push(puppet.id);
                 log(`${n2.name}の傀儡国、${puppet.name}が参戦しました。`, "log-war");
+            }
+        }
+    });
+
+    // 同盟国の介入 (防御側n2の味方のみ)
+    // n2の同盟国をチェック
+    n2.allies.forEach(allyId => {
+        const ally = nations.find(a => a.id === allyId);
+        if (ally && !ally.isDead && !ally.atWarWith.includes(n1.id) && ally.id !== n1.id) {
+            // 確率で参戦 (高い確率)
+            if (Math.random() < 0.9) {
+                log(`同盟義務: ${ally.name}は${n2.name}との同盟に基づき、${n1.name}に宣戦布告しました！`, "log-war");
+                declareWar(ally, n1);
+            } else {
+                log(`同盟不履行: ${ally.name}は${n2.name}への援軍を拒否しました...(関係悪化)`, "log-info");
+                // 関係悪化
+                breakAlliance(n2, ally);
+                n2.relations[ally.id] = -50;
+                ally.relations[n2.id] = -50;
             }
         }
     });
