@@ -247,6 +247,7 @@ const COLORS = {
 };
 const RELIGIONS = ['太陽神教', '海霊信仰', '機械崇拝', '自然の秩序', '混沌', '虚無'];
 const TECH_LEVELS = ['原始的', '農耕社会', '工業化', '現代的', '未来的'];
+const KANJI_CHARS = ["龍", "鳳", "蒼", "天", "央", "日", "月", "星", "雲", "雷", "風", "火", "水", "土", "木", "金", "銀", "鉄", "皇", "王", "帝", "聖", "神", "魔", "霊", "幻", "夢", "愛", "恋", "哀", "愁", "喜", "楽", "怒", "憎", "善", "悪", "真", "偽", "正", "邪", "明", "暗", "白", "黒", "赤", "青", "黄", "緑", "紫", "紅", "碧", "朱", "玄", "旭", "暁", "曙", "霞", "霧", "嵐", "雪", "氷", "霜", "露", "雨", "空", "海", "洋", "湖", "河", "川", "山", "岳", "峰", "丘", "谷", "峡", "洞", "岩", "石", "砂", "泥", "土", "田", "畑", "森", "林", "樹", "草", "花", "葉", "根", "実", "種", "芽", "翼", "羽", "毛", "皮", "肉", "骨", "血", "心", "眼", "耳", "口", "手", "足", "身", "力", "知", "智", "信", "義", "礼", "仁", "徳", "道", "法", "理", "気", "術", "芸", "文", "武", "戦", "争", "兵", "軍", "国", "邦", "都", "京", "市", "町", "村", "里", "家", "宮", "殿", "城", "塞", "塔", "門", "橋", "道", "路", "港", "津", "浦", "浜", "岸", "島"];
 
 const POLITICAL_SYSTEMS = {
     ECONOMIC: ['自由放任主義', '社会的市場経済', '混合経済', '計画経済', '統制経済', '協同組合主義', '重商主義', '農本主義'],
@@ -1130,6 +1131,7 @@ class Nation {
     constructor(id, x, y) {
         this.id = (id !== undefined) ? id : nationIdCounter++;
         this.color = `hsl(${Math.random()*360}, 70%, 50%)`;
+        this.cultureType = Math.random() < 0.4 ? 'KANJI' : 'ALPHABET';
         this.baseName = this.generateBaseName();
         this.regimeNumber = 1;
         this.religion = RELIGIONS[Math.floor(Math.random() * RELIGIONS.length)];
@@ -1214,22 +1216,41 @@ class Nation {
     }
 
     generateBaseName() {
-        const syl = ["アル", "バン", "シー", "ドル", "エル", "ファ", "ゴル", "ハン", "イル", "ジョ", "カ", "ロル", "ミ", "ノル", "パ", "ク", "ロ", "サ", "ティ", "ウル", "ヴァ", "キ", "ズ"];
-        for(let i=0; i<100; i++) {
-            let name = syl[Math.floor(Math.random()*syl.length)] + syl[Math.floor(Math.random()*syl.length)];
-            if (!isBaseNameTaken(name, this.id)) return name;
+        if (this.cultureType === 'KANJI') {
+            for(let i=0; i<100; i++) {
+                const len = Math.random() < 0.8 ? 2 : 3;
+                let name = "";
+                for(let j=0; j<len; j++) name += KANJI_CHARS[Math.floor(Math.random()*KANJI_CHARS.length)];
+                if (!isBaseNameTaken(name, this.id)) return name;
+            }
+            return KANJI_CHARS[Math.floor(Math.random()*KANJI_CHARS.length)] + KANJI_CHARS[Math.floor(Math.random()*KANJI_CHARS.length)] + Math.floor(Math.random()*100);
+        } else {
+            const syl = ["アル", "バン", "シー", "ドル", "エル", "ファ", "ゴル", "ハン", "イル", "ジョ", "カ", "ロル", "ミ", "ノル", "パ", "ク", "ロ", "サ", "ティ", "ウル", "ヴァ", "キ", "ズ"];
+            for(let i=0; i<100; i++) {
+                let name = syl[Math.floor(Math.random()*syl.length)] + syl[Math.floor(Math.random()*syl.length)];
+                if (!isBaseNameTaken(name, this.id)) return name;
+            }
+            return syl[Math.floor(Math.random()*syl.length)] + syl[Math.floor(Math.random()*syl.length)] + Math.floor(Math.random()*100);
         }
-        return syl[Math.floor(Math.random()*syl.length)] + syl[Math.floor(Math.random()*syl.length)] + Math.floor(Math.random()*100);
     }
 
     generateCityName() {
-        const syl = ["アル", "バン", "シー", "ドル", "エル", "ファ", "ゴル", "ハン", "イル", "ジョ", "カ", "ロル", "ミ", "ノル", "パ", "ク", "ロ", "サ", "ティ", "ウル", "ヴァ", "キ", "ズ"];
-        const suffix = ["市", "府", "京", "要塞", "港", "都"];
-        for(let i=0; i<100; i++) {
-            let name = syl[Math.floor(Math.random()*syl.length)] + syl[Math.floor(Math.random()*syl.length)] + suffix[Math.floor(Math.random()*suffix.length)];
-            if (!isCityNameTaken(name)) return name;
+        if (this.cultureType === 'KANJI') {
+            const suffix = ["市", "京", "都", "府", "港", "宿", "町"];
+            for(let i=0; i<100; i++) {
+                let name = KANJI_CHARS[Math.floor(Math.random()*KANJI_CHARS.length)] + KANJI_CHARS[Math.floor(Math.random()*KANJI_CHARS.length)] + suffix[Math.floor(Math.random()*suffix.length)];
+                if (!isCityNameTaken(name)) return name;
+            }
+            return KANJI_CHARS[Math.floor(Math.random()*KANJI_CHARS.length)] + "市" + Math.floor(Math.random()*100);
+        } else {
+            const syl = ["アル", "バン", "シー", "ドル", "エル", "ファ", "ゴル", "ハン", "イル", "ジョ", "カ", "ロル", "ミ", "ノル", "パ", "ク", "ロ", "サ", "ティ", "ウル", "ヴァ", "キ", "ズ"];
+            const suffix = ["市", "府", "京", "要塞", "港", "都"];
+            for(let i=0; i<100; i++) {
+                let name = syl[Math.floor(Math.random()*syl.length)] + syl[Math.floor(Math.random()*syl.length)] + suffix[Math.floor(Math.random()*suffix.length)];
+                if (!isCityNameTaken(name)) return name;
+            }
+            return syl[Math.floor(Math.random()*syl.length)] + syl[Math.floor(Math.random()*syl.length)] + suffix[Math.floor(Math.random()*suffix.length)] + Math.floor(Math.random()*100);
         }
-        return syl[Math.floor(Math.random()*syl.length)] + syl[Math.floor(Math.random()*syl.length)] + suffix[Math.floor(Math.random()*suffix.length)] + Math.floor(Math.random()*100);
     }
 
     updateName() {
@@ -1694,88 +1715,80 @@ function renderMap() {
             if (type === 3) color = COLORS.RIVER;
             if (type === 4) color = COLORS.MAJOR_RIVER;
 
-            // 国の色オーバーレイ
-            if (owner !== -1 && !isDrawing) {
+            // 描画ロジックの分離
+            if (mapMode === 'political' && owner !== -1 && !isDrawing) {
+                // 政治モード: 地形を隠し、国の色のみを表示
                 const nat = nations.find(n => n.id === owner);
                 if (nat) {
-                    if (mapMode === 'political') {
-                        let fillColor = nat.color;
+                    let fillColor = nat.color;
+                    
+                    // Detailed Domestic Politics Mode
+                    if (activeScenario === 'GRACEFUL_US' && nat.id === nations[0].id) {
+                        // Find nearest city
+                        let bestCity = null;
+                        let minDist = Infinity;
                         
-                        // Detailed Domestic Politics Mode
-                        if (activeScenario === 'GRACEFUL_US' && nat.id === nations[0].id) {
-                            // Find nearest city
-                            let bestCity = null;
-                            let minDist = Infinity;
-                            
-                            for (const c of nat.cities) {
-                                const dx = (c.tileIdx % width) - x;
-                                const dy = Math.floor(c.tileIdx / width) - y;
-                                const dist = dx*dx + dy*dy;
-                                if (dist < minDist) {
-                                    minDist = dist;
-                                    bestCity = c;
-                                    if (minDist < 10) break; 
-                                }
-                            }
-                            
-                            if (bestCity && bestCity.partySupport) {
-                                let maxSupport = -1;
-                                let dominantColor = nat.color;
-                                nat.parties.forEach(p => {
-                                    if (bestCity.partySupport[p.name] > maxSupport) {
-                                        maxSupport = bestCity.partySupport[p.name];
-                                        dominantColor = p.color;
-                                    }
-                                });
-                                fillColor = dominantColor;
-                            }
-                        } else {
-                            if (nat.isPuppet && nat.masterId !== -1) {
-                                const master = nations.find(m => m.id === nat.masterId);
-                                if (master) fillColor = master.color;
+                        for (const c of nat.cities) {
+                            const dx = (c.tileIdx % width) - x;
+                            const dy = Math.floor(c.tileIdx / width) - y;
+                            const dist = dx*dx + dy*dy;
+                            if (dist < minDist) {
+                                minDist = dist;
+                                bestCity = c;
+                                if (minDist < 10) break; 
                             }
                         }
-
-                        // 国の色をベースにするが、地形も見せる
-                        ctx.globalAlpha = 0.6;
-                        ctx.fillStyle = fillColor;
-                        ctx.fillRect(offsetX + x*TILE_SIZE, offsetY + y*TILE_SIZE, TILE_SIZE, TILE_SIZE);
-                        ctx.globalAlpha = 1.0;
+                        
+                        if (bestCity && bestCity.partySupport) {
+                            let maxSupport = -1;
+                            let dominantColor = nat.color;
+                            nat.parties.forEach(p => {
+                                if (bestCity.partySupport[p.name] > maxSupport) {
+                                    maxSupport = bestCity.partySupport[p.name];
+                                    dominantColor = p.color;
+                                }
+                            });
+                            fillColor = dominantColor;
+                        }
                     } else {
-                        // 地形をベースにする
-                        ctx.fillStyle = color;
-                        ctx.fillRect(offsetX + x*TILE_SIZE, offsetY + y*TILE_SIZE, TILE_SIZE, TILE_SIZE);
+                        if (nat.isPuppet && nat.masterId !== -1) {
+                            const master = nations.find(m => m.id === nat.masterId);
+                            if (master) fillColor = master.color;
+                        }
                     }
-                    
-                    // 山や川の場合は装飾 (常に表示)
-                    if (type === 2) { // 山
-                        // Draw mountain peak
-                        ctx.fillStyle = "rgba(20,20,20,0.6)";
-                        ctx.beginPath();
-                        ctx.moveTo(offsetX + x*TILE_SIZE, offsetY + (y+1)*TILE_SIZE);
-                        ctx.lineTo(offsetX + (x+0.5)*TILE_SIZE, offsetY + y*TILE_SIZE);
-                        ctx.lineTo(offsetX + (x+1)*TILE_SIZE, offsetY + (y+1)*TILE_SIZE);
-                        ctx.fill();
-                    }
-                    else if (type === 3) { // 川
-                        ctx.fillStyle = "rgba(100,200,255,0.8)";
-                        ctx.fillRect(offsetX + x*TILE_SIZE + TILE_SIZE/3, offsetY + y*TILE_SIZE, TILE_SIZE/3, TILE_SIZE);
-                    }
-                    else if (type === 4) { // 大河
-                        ctx.fillStyle = "#1f618d";
-                        ctx.fillRect(offsetX + x*TILE_SIZE, offsetY + y*TILE_SIZE, TILE_SIZE, TILE_SIZE);
-                    }
+
+                    ctx.fillStyle = fillColor;
+                    ctx.fillRect(offsetX + x*TILE_SIZE, offsetY + y*TILE_SIZE, TILE_SIZE, TILE_SIZE);
                 }
             } else {
-                // 描画モード or 領土なし
+                // 地形モード (または領土なし): 地形の色を表示
                 ctx.fillStyle = color;
                 ctx.fillRect(offsetX + x*TILE_SIZE, offsetY + y*TILE_SIZE, TILE_SIZE, TILE_SIZE);
+                
+                // 地形モードのみ山や川を表示
+                if (type === 2) { // 山
+                    // Draw mountain peak
+                    ctx.fillStyle = "rgba(20,20,20,0.6)";
+                    ctx.beginPath();
+                    ctx.moveTo(offsetX + x*TILE_SIZE, offsetY + (y+1)*TILE_SIZE);
+                    ctx.lineTo(offsetX + (x+0.5)*TILE_SIZE, offsetY + y*TILE_SIZE);
+                    ctx.lineTo(offsetX + (x+1)*TILE_SIZE, offsetY + (y+1)*TILE_SIZE);
+                    ctx.fill();
+                }
+                else if (type === 3) { // 川
+                    ctx.fillStyle = "rgba(100,200,255,0.8)";
+                    ctx.fillRect(offsetX + x*TILE_SIZE + TILE_SIZE/3, offsetY + y*TILE_SIZE, TILE_SIZE/3, TILE_SIZE);
+                }
+                else if (type === 4) { // 大河
+                    ctx.fillStyle = "#1f618d";
+                    ctx.fillRect(offsetX + x*TILE_SIZE, offsetY + y*TILE_SIZE, TILE_SIZE, TILE_SIZE);
+                }
             }
         }
     }
     
     // 国境線の描画 (HOI4スタイル)
-    if (!isDrawing) {
+    if (!isDrawing && mapMode === 'political') {
         ctx.lineWidth = 2;
         for (let y = 0; y < height; y++) {
             for (let x = 0; x < width; x++) {
@@ -1805,7 +1818,7 @@ function renderMap() {
     }
 
     // 都市の描画
-    if (!isDrawing) {
+    if (!isDrawing && mapMode === 'political') {
         nations.forEach(n => {
             if (n.isDead) return;
             n.cities.forEach((city, idx) => {
