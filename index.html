@@ -164,6 +164,12 @@ if ('serviceWorker' in navigator) {
                     <option value="256">大 (256x256)</option>
                 </select>
             </div>
+            <div>
+                シナリオ: <select id="scenarioSelect">
+                    <option value="BLITZKRIEG" selected>電撃戦</option>
+                    <option value="QUIET_SPARKS">静かなる火花</option>
+                </select>
+            </div>
             <button id="btn-fill" style="margin-bottom:10px;">塗りつぶしモード: オフ</button>
             <button id="btn-generate">世界を生成 (シミュレーション開始)</button>
         </div>
@@ -308,6 +314,7 @@ function generatePoliticalSystem(currentTech) {
 
 // グローバル変数
 let canvas, ctx, width, height;
+let currentScenario = 'BLITZKRIEG';
 let grid = []; // 0:Water, 1:Land, 2:Mountain, 3:River
 let ownerGrid = []; // ID of the nation owning this tile (-1 for none)
 let nations = [];
@@ -466,6 +473,10 @@ function setupInput() {
     // UIボタン
     document.getElementById('mapSize').addEventListener('change', (e) => {
         initGrid(parseInt(e.target.value));
+    });
+
+    document.getElementById('scenarioSelect').addEventListener('change', (e) => {
+        currentScenario = e.target.value;
     });
 
     document.getElementById('btn-generate').addEventListener('click', () => {
@@ -1530,10 +1541,18 @@ function handlePolitics(n) {
 
         // Grand Empire Succession Crisis
         if (n.isGrandEmpire) {
+            let collapseProb = 0.9;
+            let civilWarProb = 0.8;
+            
+            if (currentScenario === 'QUIET_SPARKS') {
+                collapseProb = 0.1;
+                civilWarProb = 0.2;
+            }
+
             // 大帝国の崩壊 (高確率で群雄割拠へ)
-            if (Math.random() < 0.9) {
+            if (Math.random() < collapseProb) {
                 triggerImperialCollapse(n);
-            } else if (n.cities.length >= 2 && Math.random() < 0.8) {
+            } else if (n.cities.length >= 2 && Math.random() < civilWarProb) {
                 triggerSuccessionCivilWar(n);
             }
         }
@@ -1595,6 +1614,11 @@ function handlePolitics(n) {
             let rebelChance = (n.sysBroad === '民主主義') ? 0.00005 : 0.005;
             let unrestThreshold = (n.sysBroad === '民主主義') ? 90 : 75;
 
+            if (currentScenario === 'QUIET_SPARKS') {
+                rebelChance /= 20;
+                unrestThreshold = Math.min(100, unrestThreshold + 10);
+            }
+
             if (city.unrest > unrestThreshold && Math.random() < rebelChance) {
                 rebellingCities.push(city);
             }
@@ -1617,8 +1641,13 @@ function handlePolitics(n) {
     }
 
     // 政変の判定
-    const coupThreshold = (n.sysBroad === '民主主義') ? 40 : 50; // 民主制は崩壊しにくい
-    const coupChance = (n.sysBroad === '民主主義') ? 0.0005 : 0.002;
+    let coupThreshold = (n.sysBroad === '民主主義') ? 40 : 50; // 民主制は崩壊しにくい
+    let coupChance = (n.sysBroad === '民主主義') ? 0.0005 : 0.002;
+
+    if (currentScenario === 'QUIET_SPARKS') {
+        coupChance /= 10;
+        coupThreshold -= 10;
+    }
 
     if (n.stability < coupThreshold && Math.random() < coupChance) {
         const oldName = n.name;
@@ -2497,7 +2526,10 @@ function simulateTick() {
                     if (n2 && !n2.isDead && !n2.isPuppet && !top3Ids.includes(n2.id)) {
                         if (n1.religion === n2.religion && !n1.atWarWith.includes(n2.id)) {
                             // 合併実行 (低確率)
-                            if (Math.random() < 0.005) {
+                            let mergerChance = 0.005;
+                            if (currentScenario === 'QUIET_SPARKS') mergerChance = 0.0005;
+
+                            if (Math.random() < mergerChance) {
                                 log(`連邦形成: 共通の脅威に対抗するため、${n1.name}と${n2.name}は${n1.religion}の旗印のもとに統合しました！`, "log-peace");
                                 n1.addHistory(`連邦形成: ${n2.name}と統合`);
                                 n2.addHistory(`連邦形成: ${n1.name}と統合`);
@@ -2671,7 +2703,25 @@ function simulateTick() {
             }
         }
         
-        if (n.relations[target.id] < -50 && (neighbor || canNavalInvade)) {
+        let warThreshold = -50;
+        let isColdWar = false;
+
+        if (currentScenario === 'QUIET_SPARKS') {
+            warThreshold = -70; 
+            
+            const isMajor = n.tiles.length > 50 || n.gdp > 2000;
+            const targetIsMajor = target.tiles.length > 50 || target.gdp > 2000;
+
+            if (isMajor) {
+                warThreshold = -85;
+                if (targetIsMajor) {
+                     warThreshold = -95;
+                     isColdWar = true;
+                }
+            }
+        }
+
+        if (n.relations[target.id] < warThreshold && (neighbor || canNavalInvade)) {
             if (!n.atWarWith.includes(target.id)) {
                 // 傀儡国は主人に逆らわない
                 if (n.isPuppet && n.masterId === target.id) return;
@@ -2679,6 +2729,11 @@ function simulateTick() {
                 if (target.isPuppet && target.masterId === n.id) return;
                 declareWar(n, target);
             }
+        } else if (currentScenario === 'QUIET_SPARKS' && isColdWar && n.relations[target.id] < -60 && (neighbor || canNavalInvade)) {
+             // Cold War Tension
+             if (!n.atWarWith.includes(target.id) && Math.random() < 0.005) {
+                 worldTension = Math.min(100, worldTension + 0.5);
+             }
         }
 
         // 野心による開戦 (圧倒的有利な場合)
@@ -2687,6 +2742,11 @@ function simulateTick() {
         if (n.isGrandEmpire) {
             ambitionThreshold = 1.2;
             ambitionChance = 0.2; // Very aggressive
+        }
+
+        if (currentScenario === 'QUIET_SPARKS') {
+            ambitionChance /= 5;
+            ambitionThreshold += 1.0;
         }
 
         if ((neighbor || canNavalInvade) && n.getMilitaryPower() > target.getMilitaryPower() * ambitionThreshold && Math.random() < ambitionChance) {
