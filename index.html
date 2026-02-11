@@ -1105,9 +1105,9 @@ function generateTerrainFeatures() {
     for (let i = 0; i < width * height; i++) {
         if (grid[i] === 0 || grid[i] === 2) continue; // Skip water and mountains (mountains can have rivers start, but usually stay mountains)
         
-        if (flowMap[i] > 50) {
+        if (flowMap[i] > 200) {
             grid[i] = 4; // Major River
-        } else if (flowMap[i] > 5) {
+        } else if (flowMap[i] > 20) {
             grid[i] = 3; // River
         }
     }
@@ -2464,7 +2464,7 @@ function getNaturalTerritory(ownerId, seedIndices, targetCount) {
                     const prevType = grid[current.idx];
 
                     // 地形コスト
-                    if (type === 2) moveCost += 8; // 山岳は越えにくい
+                    if (type === 2) moveCost += 50; // 山岳は非常に越えにくい
                     if (type === 3) moveCost += 4; // 川は越えにくい
                     if (type === 4) moveCost += 12; // 大河は非常に越えにくい
                     if ((prevType === 3 || prevType === 4) && (type !== 3 && type !== 4)) moveCost += 6; // 川渡りコスト
@@ -3366,7 +3366,7 @@ function simulateTick() {
                     let nx=cx+dx, ny=cy+dy;
                     if(nx>=0 && nx<width && ny>=0 && ny<height) {
                         let nIdx = ny*width+nx;
-                        if(ownerGrid[nIdx] === -1 && grid[nIdx] === 1) { // 未所属の陸地
+                        if(ownerGrid[nIdx] === -1 && (grid[nIdx] === 1 || grid[nIdx] === 2)) { // 未所属の陸地または山岳
                             ownerGrid[nIdx] = n.id;
                             n.tiles.push(nIdx);
                             // コスト
@@ -4371,7 +4371,7 @@ function stealTerritory(winner, loser) {
             // 地形による進軍速度の変動
             const terrain = grid[targetIdx];
             let difficulty = 1;
-            if (terrain === 2) difficulty = 4; // 山岳: 1/4の確率
+            if (terrain === 2) difficulty = 20; // 山岳: 1/20の確率
             if (terrain === 3) difficulty = 2; // 河川: 1/2の確率
             if (terrain === 4) difficulty = 6; // 大河: 1/6の確率
             
