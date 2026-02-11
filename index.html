@@ -1105,7 +1105,7 @@ function generateTerrainFeatures() {
     for (let i = 0; i < width * height; i++) {
         if (grid[i] === 0 || grid[i] === 2) continue; // Skip water and mountains (mountains can have rivers start, but usually stay mountains)
         
-        if (flowMap[i] > 20) {
+        if (flowMap[i] > 50) {
             grid[i] = 4; // Major River
         } else if (flowMap[i] > 5) {
             grid[i] = 3; // River
@@ -3344,7 +3344,7 @@ function simulateTick() {
         handlePolitics(n);
 
         // 未開拓地の植民
-        if (Math.random() < 0.05) { // 5% chance per tick
+        if (n.tech >= 3 && Math.random() < 0.05) { // 5% chance per tick, only for Modern+
             // ランダムに領土をピックして、隣接する未開拓地(ownerGrid == -1)を探す
             const sampleTiles = [];
             for(let i=0; i<10; i++) {
