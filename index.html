@@ -2105,7 +2105,8 @@ function handlePolitics(n) {
             declareIndependence(n);
         }
         // 2. 機会主義的独立 (宗主国が不安定かつ自国が安定)
-        else {
+        // 徹底抗戦モードでは独立不可
+        else if (activeScenario !== 'TOTALLER_KRIEG') {
             // 海を隔てているかチェック
             let isSeparated = false;
             if (n.tiles.length > 0 && master.tiles.length > 0) {
@@ -2141,7 +2142,7 @@ function handlePolitics(n) {
         n.addHistory(`指導者交代: ${oldLeader} -> ${n.leader}`);
 
         // Grand Empire Succession Crisis
-        if (n.isGrandEmpire) {
+        if (n.isGrandEmpire && activeScenario !== 'TOTALLER_KRIEG') {
             let collapseProb = 0.9;
             let civilWarProb = 0.8;
             
@@ -2251,6 +2252,9 @@ function handlePolitics(n) {
     }
 
     if (n.stability < coupThreshold && Math.random() < coupChance) {
+        // 徹底抗戦モードの枢軸国・連合国は政変不可
+        if (activeScenario === 'TOTALLER_KRIEG' && (n.name === '枢軸国' || n.name === '連合国')) return;
+
         const oldName = n.name;
         const oldGov = n.sysDetailed;
         
@@ -2268,6 +2272,9 @@ function handlePolitics(n) {
 
     // 民主制への移行
     if (n.sysBroad !== '民主主義' && n.tech >= 3 && n.stability > 80 && Math.random() < 0.001) {
+        // 徹底抗戦モードの枢軸国は民主化しない
+        if (activeScenario === 'TOTALLER_KRIEG' && n.name === '枢軸国') return;
+
         const oldName = n.name;
         
         n.sysBroad = '民主主義';
@@ -2477,6 +2484,8 @@ function getNaturalTerritory(ownerId, seedIndices, targetCount) {
 }
 
 function grantIndependence(n, city) {
+    if (activeScenario === 'TOTALLER_KRIEG') return;
+
     const newNation = new Nation();
     newNation.baseName = n.baseName;
     
@@ -2555,6 +2564,8 @@ function grantIndependence(n, city) {
 }
 
 function triggerCityRebellion(n, cities) {
+    if (activeScenario === 'TOTALLER_KRIEG') return;
+
     // 反乱軍の生成
     const rebel = new Nation();
     rebel.baseName = n.baseName;
@@ -2805,6 +2816,7 @@ function getDistSq(idx1, idx2) {
 }
 
 function triggerImperialCollapse(n) {
+    if (activeScenario === 'TOTALLER_KRIEG') return;
     if (n.tiles.length < 5) return; 
 
     log(`崩壊: 指導者の死をきっかけに、大帝国${n.name}は制御を失い、群雄割拠の時代へと突入しました！`, "log-war");
@@ -3235,6 +3247,22 @@ function simulateTick() {
     if (mapDirty) {
         updateContinents();
         mapDirty = false;
+    }
+
+    // 徹底抗戦モードのゲームオーバー判定
+    if (activeScenario === 'TOTALLER_KRIEG') {
+        const axis = nations.find(n => n.name === '枢軸国');
+        const allies = nations.find(n => n.name === '連合国');
+        
+        if (axis && (axis.isDead || axis.isPuppet)) {
+            isPaused = true;
+            alert(`徹底抗戦終了: 枢軸国は降伏しました。\n生存期間: ${year}年`);
+            return;
+        } else if (allies && (allies.isDead || allies.isPuppet)) {
+            isPaused = true;
+            alert(`徹底抗戦終了: 連合国は降伏しました。\n枢軸国の勝利です！ (生存期間: ${year}年)`);
+            return;
+        }
     }
 
     let totalPop = 0;
