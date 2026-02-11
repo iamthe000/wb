@@ -316,6 +316,7 @@ function generatePoliticalSystem(currentTech) {
 // グローバル変数
 let canvas, ctx, width, height;
 let currentScenario = 'BLITZKRIEG';
+let activeScenario = 'BLITZKRIEG'; // Scenario used for generation (latched)
 let grid = []; // 0:Water, 1:Land, 2:Mountain, 3:River
 let ownerGrid = []; // ID of the nation owning this tile (-1 for none)
 let nations = [];
@@ -777,6 +778,8 @@ function generateWorld() {
     document.getElementById('menu-panel').style.display = 'none';
     document.getElementById('sim-panel').style.display = 'block';
 
+    activeScenario = currentScenario;
+
     // 1. 地形補正 (山と川)
     generateTerrainFeatures();
 
@@ -917,6 +920,7 @@ class City {
         this.tileIdx = tileIdx;
         this.nationId = nationId;
         this.unrest = 0;
+        this.partySupport = {}; // { "PartyName": 0-100 }
     }
 }
 
@@ -1207,7 +1211,7 @@ function spawnNations() {
 
     nationIdCounter = 0;
 
-    if (currentScenario === 'GRACEFUL_US') {
+    if (activeScenario === 'GRACEFUL_US') {
         if (landTiles.length === 0) return;
         
         // Create One Massive Nation
@@ -1218,6 +1222,8 @@ function spawnNations() {
         us.sysBroad = "民主主義";
         us.sysDetailed = "大統領制";
         us.sovereign = "国民";
+        us.stateStruct = "連邦国家";
+        us.ecoIdeology = "混合経済";
         us.govType = "大統領制";
         us.tech = 3; // Modern
         us.pop = 330000000;
@@ -1244,6 +1250,7 @@ function spawnNations() {
 
         us.president = { name: "ジョン・ドウ", ideology: "中道", term: 1 };
         us.electionYear = year + 4;
+        us.supportHistory = []; // Array of { year, parties: [{name, support}] }
         
         // Assign all land
         landTiles.forEach(tIdx => {
@@ -1251,7 +1258,7 @@ function spawnNations() {
             us.tiles.push(tIdx);
         });
         
-        // Generate State Capitals
+        // Generate State Capitals & Initialize Local Politics
         const numStates = 50;
         for (let i=0; i<numStates; i++) {
             if (us.tiles.length === 0) break;
@@ -1260,7 +1267,24 @@ function spawnNations() {
             const tooClose = us.cities.some(c => getDistSq(c.tileIdx, t) < 100);
             if (!tooClose) {
                 const cityName = us.generateCityName();
-                us.cities.push(new City(cityName, t, us.id));
+                const city = new City(cityName, t, us.id);
+                
+                // Initialize local support with variance
+                let total = 0;
+                us.parties.forEach(p => {
+                    let base = p.support; // National average
+                    // Random variance: +/- 20%
+                    let variance = (Math.random() - 0.5) * 40;
+                    let val = Math.max(0, base + variance);
+                    city.partySupport[p.name] = val;
+                    total += val;
+                });
+                // Normalize
+                us.parties.forEach(p => {
+                    city.partySupport[p.name] = (city.partySupport[p.name] / total) * 100;
+                });
+
+                us.cities.push(city);
             }
         }
         
@@ -1420,11 +1444,50 @@ function renderMap() {
                 const nat = nations.find(n => n.id === owner);
                 if (nat) {
                     if (mapMode === 'political') {
-                        // 傀儡国は宗主国の色を使用
                         let fillColor = nat.color;
-                        if (nat.isPuppet && nat.masterId !== -1) {
-                            const master = nations.find(m => m.id === nat.masterId);
-                            if (master) fillColor = master.color;
+                        
+                        // Detailed Domestic Politics Mode
+                        if (activeScenario === 'GRACEFUL_US' && nat.id === nations[0].id) {
+                            // Find nearest city to determine "State" color
+                            // This is expensive per pixel, so we should optimize or limit resolution.
+                            // However, grid is small (128x128), so linear search over ~50 cities is ~16k * 50 = 800k ops. 
+                            // Might be slow on mobile. 
+                            // Optimization: Pre-calculate this or simple distance check
+                            
+                            let bestCity = null;
+                            let minDist = Infinity;
+                            
+                            // Simple optimization: check only if we are on land
+                            // To speed up, we can use a pre-computed map or just iterate
+                            for (const c of nat.cities) {
+                                const dx = (c.tileIdx % width) - x;
+                                const dy = Math.floor(c.tileIdx / width) - y;
+                                const dist = dx*dx + dy*dy;
+                                if (dist < minDist) {
+                                    minDist = dist;
+                                    bestCity = c;
+                                    if (minDist < 10) break; // Good enough
+                                }
+                            }
+                            
+                            if (bestCity && bestCity.partySupport) {
+                                // Find dominant party
+                                let maxSupport = -1;
+                                let dominantColor = nat.color;
+                                nat.parties.forEach(p => {
+                                    if (bestCity.partySupport[p.name] > maxSupport) {
+                                        maxSupport = bestCity.partySupport[p.name];
+                                        dominantColor = p.color;
+                                    }
+                                });
+                                fillColor = dominantColor;
+                            }
+                        } else {
+                            // Standard Political Mode
+                            if (nat.isPuppet && nat.masterId !== -1) {
+                                const master = nations.find(m => m.id === nat.masterId);
+                                if (master) fillColor = master.color;
+                            }
                         }
 
                         // 国の色をベースにするが、地形も見せる (透過させる)
@@ -1608,7 +1671,7 @@ function handlePolitics(n) {
             let collapseProb = 0.9;
             let civilWarProb = 0.8;
             
-            if (currentScenario === 'QUIET_SPARKS') {
+            if (activeScenario === 'QUIET_SPARKS') {
                 collapseProb = 0.1;
                 civilWarProb = 0.2;
             }
@@ -1678,7 +1741,7 @@ function handlePolitics(n) {
             let rebelChance = (n.sysBroad === '民主主義') ? 0.00005 : 0.005;
             let unrestThreshold = (n.sysBroad === '民主主義') ? 90 : 75;
 
-            if (currentScenario === 'QUIET_SPARKS') {
+            if (activeScenario === 'QUIET_SPARKS') {
                 rebelChance /= 20;
                 unrestThreshold = Math.min(100, unrestThreshold + 10);
             }
@@ -1708,7 +1771,7 @@ function handlePolitics(n) {
     let coupThreshold = (n.sysBroad === '民主主義') ? 40 : 50; // 民主制は崩壊しにくい
     let coupChance = (n.sysBroad === '民主主義') ? 0.0005 : 0.002;
 
-    if (currentScenario === 'QUIET_SPARKS') {
+    if (activeScenario === 'QUIET_SPARKS') {
         coupChance /= 10;
         coupThreshold -= 10;
     }
@@ -2327,17 +2390,52 @@ function triggerImperialCollapse(n) {
 }
 
 function simulateDomesticPolitics(n) {
-    // 1. Party Support Fluctuation
-    n.parties.forEach(p => {
-        let change = (Math.random() - 0.5) * 2;
-        // Effect of stability
-        if (n.stability < 50 && p.name !== "民主党") change += 0.5; // Unrest helps opposition (simplified)
-        p.support = Math.max(0, p.support + change);
+    // 1. Local & National Support Fluctuation
+    
+    // a. Update City Level Support
+    n.cities.forEach(city => {
+        let total = 0;
+        n.parties.forEach(p => {
+            let current = city.partySupport[p.name] || 0;
+            // Random drift
+            let change = (Math.random() - 0.5) * 4; 
+            // Regional events or trends could go here
+            city.partySupport[p.name] = Math.max(0, current + change);
+            total += city.partySupport[p.name];
+        });
+        // Normalize city support
+        n.parties.forEach(p => {
+            city.partySupport[p.name] = (city.partySupport[p.name] / total) * 100;
+        });
+    });
+
+    // b. Calculate National Average (Population Weighted - Simplified to City Average for now)
+    // To be precise we should weight by city size, but uniform is ok for this level of sim.
+    let nationalSums = {};
+    n.parties.forEach(p => nationalSums[p.name] = 0);
+    
+    n.cities.forEach(city => {
+        n.parties.forEach(p => {
+            nationalSums[p.name] += city.partySupport[p.name];
+        });
     });
     
-    // Normalize support
-    let totalSupport = n.parties.reduce((sum, p) => sum + p.support, 0);
-    n.parties.forEach(p => p.support = (p.support / totalSupport) * 100);
+    n.parties.forEach(p => {
+        if (n.cities.length > 0) {
+            p.support = nationalSums[p.name] / n.cities.length;
+        }
+    });
+
+    // c. Record History
+    if (year % 1 === 0) { // Record every year
+        let historyEntry = { year: year, parties: [] };
+        n.parties.forEach(p => {
+            historyEntry.parties.push({ name: p.name, color: p.color, support: p.support });
+        });
+        n.supportHistory.push(historyEntry);
+        // Keep last 100 years
+        if (n.supportHistory.length > 100) n.supportHistory.shift();
+    }
 
     // 2. Random Events
     if (Math.random() < 0.05) {
@@ -2566,7 +2664,7 @@ function simulateTick() {
     document.getElementById('info-pop').innerText = formatNum(totalPop);
 
     // 2. 外交フェーズ / 国内政治フェーズ
-    if (currentScenario === 'GRACEFUL_US') {
+    if (activeScenario === 'GRACEFUL_US') {
         const us = nations[0];
         if (us && !us.isDead) {
             simulateDomesticPolitics(us);
@@ -2669,7 +2767,7 @@ function simulateTick() {
                         if (n1.religion === n2.religion && !n1.atWarWith.includes(n2.id)) {
                             // 合併実行 (低確率)
                             let mergerChance = 0.005;
-                            if (currentScenario === 'QUIET_SPARKS') mergerChance = 0.0005;
+                            if (activeScenario === 'QUIET_SPARKS') mergerChance = 0.0005;
 
                             if (Math.random() < mergerChance) {
                                 log(`連邦形成: 共通の脅威に対抗するため、${n1.name}と${n2.name}は${n1.religion}の旗印のもとに統合しました！`, "log-peace");
@@ -2848,7 +2946,7 @@ function simulateTick() {
         let warThreshold = -50;
         let isColdWar = false;
 
-        if (currentScenario === 'QUIET_SPARKS') {
+        if (activeScenario === 'QUIET_SPARKS') {
             warThreshold = -70; 
             
             const isMajor = n.tiles.length > 50 || n.gdp > 2000;
@@ -2871,7 +2969,7 @@ function simulateTick() {
                 if (target.isPuppet && target.masterId === n.id) return;
                 declareWar(n, target);
             }
-        } else if (currentScenario === 'QUIET_SPARKS' && isColdWar && n.relations[target.id] < -60 && (neighbor || canNavalInvade)) {
+        } else if (activeScenario === 'QUIET_SPARKS' && isColdWar && n.relations[target.id] < -60 && (neighbor || canNavalInvade)) {
              // Cold War Tension
              if (!n.atWarWith.includes(target.id) && Math.random() < 0.005) {
                  worldTension = Math.min(100, worldTension + 0.5);
@@ -2886,7 +2984,7 @@ function simulateTick() {
             ambitionChance = 0.2; // Very aggressive
         }
 
-        if (currentScenario === 'QUIET_SPARKS') {
+        if (activeScenario === 'QUIET_SPARKS') {
             ambitionChance /= 5;
             ambitionThreshold += 1.0;
         }
@@ -3494,45 +3592,128 @@ function updateNationPanel() {
     document.getElementById('n-qual').innerText = n.soldierQuality.toFixed(2);
 
     // Domestic Politics Display
-    const existingPolitics = document.getElementById('us-politics-section');
-    if (existingPolitics) existingPolitics.remove();
-
-    if (currentScenario === 'GRACEFUL_US' && n.parties) {
-        const politicsDiv = document.createElement('div');
-        politicsDiv.id = 'us-politics-section';
-        politicsDiv.style.marginTop = '15px';
-        politicsDiv.style.borderTop = '1px solid #555';
-        politicsDiv.style.paddingTop = '10px';
-        
-        let html = `<h3>国内政治状況</h3>`;
-        if (n.president) {
-            html += `<div class="stat-row"><span>大統領:</span> <span>${n.president.name}</span></div>`;
-            html += `<div class="stat-row"><span>思想:</span> <span>${n.president.ideology}</span></div>`;
-            html += `<div class="stat-row"><span>次期選挙:</span> <span>${n.electionYear}年</span></div>`;
-        }
-        
-        html += `<h4 style="margin:5px 0; color:#ccc; font-size:0.9em;">議席分布 (全${n.parliamentSize}席)</h4>`;
-        
-        // Simple visual bar
-        html += `<div style="display:flex; height:15px; width:100%; background:#333; border-radius:3px; overflow:hidden; margin-bottom:5px;">`;
-        n.parties.forEach(p => {
-            const width = (p.seats / n.parliamentSize) * 100;
-            if (width > 0) {
-                html += `<div style="width:${width}%; background:${p.color};" title="${p.name}: ${p.seats}席"></div>`;
+    let politicsDiv = document.getElementById('us-politics-section');
+    
+    // If not graceful US or no parties, remove if exists
+    if (activeScenario !== 'GRACEFUL_US' || !n.parties) {
+        if (politicsDiv) politicsDiv.remove();
+    } else {
+        // If exists, update content. If not, create.
+        if (!politicsDiv) {
+            politicsDiv = document.createElement('div');
+            politicsDiv.id = 'us-politics-section';
+            politicsDiv.style.marginTop = '15px';
+            politicsDiv.style.borderTop = '1px solid #555';
+            politicsDiv.style.paddingTop = '10px';
+            
+            // Structure (create static elements once)
+            politicsDiv.innerHTML = `
+                <h3>国内政治状況</h3>
+                <div id="pol-pres-info"></div>
+                <h4 style="margin:5px 0; color:#ccc; font-size:0.9em;">議席分布 (全${n.parliamentSize}席)</h4>
+                <canvas id="parliament-chart" width="280" height="100" style="background:#222; margin-bottom:5px; border-radius:4px;"></canvas>
+                <div id="pol-party-list" style="margin-top:10px;"></div>
+                <h4 style="margin:10px 0 5px 0; color:#ccc; font-size:0.9em;">支持率推移 (過去100年)</h4>
+                <canvas id="support-trend-chart" width="280" height="100" style="background:#222; border:1px solid #444; border-radius:4px;"></canvas>
+            `;
+            const historyBtn = document.getElementById('btn-history');
+            if (historyBtn) {
+                document.getElementById('nation-panel').insertBefore(politicsDiv, historyBtn);
+            } else {
+                 document.getElementById('nation-panel').appendChild(politicsDiv);
             }
-        });
-        html += `</div>`;
+        }
 
-        // List
-        n.parties.forEach(p => {
-            html += `<div class="stat-row" style="font-size:0.8em; color:${p.color}">
-                <span>${p.name} (${p.ideology}):</span> 
-                <span>${p.seats}席 / 支持率${p.support.toFixed(1)}%</span>
-            </div>`;
-        });
+        // Update dynamic content
+        // President Info
+        if (n.president) {
+            const info = document.getElementById('pol-pres-info');
+            if (info) {
+                 info.innerHTML = `
+                    <div class="stat-row"><span>大統領:</span> <span>${n.president.name}</span></div>
+                    <div class="stat-row"><span>思想:</span> <span>${n.president.ideology}</span></div>
+                    <div class="stat-row"><span>次期選挙:</span> <span>${n.electionYear}年</span></div>
+                 `;
+            }
+        }
 
-        politicsDiv.innerHTML = html;
-        document.getElementById('nation-panel').insertBefore(politicsDiv, document.getElementById('btn-history'));
+        // Party List
+        const list = document.getElementById('pol-party-list');
+        if (list) {
+            let html = '';
+            n.parties.forEach(p => {
+                html += `<div style="font-size:0.8em; margin-bottom:2px; display:flex; align-items:center;">
+                    <span style="display:inline-block; width:10px; height:10px; background:${p.color}; margin-right:5px; border-radius:50%;"></span>
+                    <span style="color:${p.color}; font-weight:bold; flex:1;">${p.name}</span>
+                    <span style="margin-right:10px;">${p.seats}席</span>
+                    <span>${p.support.toFixed(1)}%</span>
+                </div>`;
+            });
+            list.innerHTML = html;
+        }
+    }
+
+    if (activeScenario === 'GRACEFUL_US' && n.parties) {
+
+        // Draw Parliament Chart
+        const pCanvas = document.getElementById('parliament-chart');
+        if (pCanvas) {
+            const pCtx = pCanvas.getContext('2d');
+            let startAngle = Math.PI;
+            // Draw half donut
+            const total = n.parliamentSize;
+            let cx = pCanvas.width / 2;
+            let cy = pCanvas.height - 10;
+            let r = 80;
+            
+            n.parties.forEach(p => {
+                let slice = (p.seats / total) * Math.PI;
+                pCtx.beginPath();
+                pCtx.arc(cx, cy, r, startAngle, startAngle + slice);
+                pCtx.arc(cx, cy, r - 30, startAngle + slice, startAngle, true);
+                pCtx.fillStyle = p.color;
+                pCtx.fill();
+                startAngle += slice;
+            });
+        }
+
+        // Draw Support Trend Chart
+        const tCanvas = document.getElementById('support-trend-chart');
+        if (tCanvas && n.supportHistory.length > 1) {
+            const tCtx = tCanvas.getContext('2d');
+            const history = n.supportHistory;
+            const w = tCanvas.width;
+            const h = tCanvas.height;
+            const padding = 10;
+            const drawW = w - padding*2;
+            const drawH = h - padding*2;
+            
+            // Grid lines
+            tCtx.strokeStyle = "#444";
+            tCtx.lineWidth = 1;
+            tCtx.beginPath();
+            tCtx.moveTo(padding, padding);
+            tCtx.lineTo(padding, h-padding);
+            tCtx.lineTo(w-padding, h-padding);
+            tCtx.stroke();
+            
+            n.parties.forEach(p => {
+                tCtx.strokeStyle = p.color;
+                tCtx.lineWidth = 2;
+                tCtx.beginPath();
+                
+                history.forEach((entry, idx) => {
+                    const partyData = entry.parties.find(pd => pd.name === p.name);
+                    if (partyData) {
+                        const x = padding + (idx / (history.length - 1)) * drawW;
+                        const y = h - padding - (partyData.support / 100) * drawH;
+                        if (idx === 0) tCtx.moveTo(x, y);
+                        else tCtx.lineTo(x, y);
+                    }
+                });
+                tCtx.stroke();
+            });
+        }
     }
 }
 
