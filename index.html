@@ -1233,9 +1233,30 @@ function spawnNations() {
         
         // Initialize Domestic Politics
         us.parties = [
-            { name: "民主党", color: "#3498db", support: 50, seats: 0, ideology: "リベラル" },
-            { name: "共和党", color: "#e74c3c", support: 48, seats: 0, ideology: "保守" },
-            { name: "リバタリアン党", color: "#f1c40f", support: 2, seats: 0, ideology: "自由至上主義" }
+            { 
+                name: "民主党", 
+                color: "#3498db", 
+                support: 48, 
+                seats: 0, 
+                ideology: "リベラル",
+                stats: { stab: 0.1, tech: 0.05, gdp: 0.01, mil: -0.05 } 
+            },
+            { 
+                name: "共和党", 
+                color: "#e74c3c", 
+                support: 46, 
+                seats: 0, 
+                ideology: "保守",
+                stats: { stab: 0, tech: 0, gdp: 0.05, mil: 0.1 } 
+            },
+            { 
+                name: "リバタリアン党", 
+                color: "#f1c40f", 
+                support: 6, 
+                seats: 0, 
+                ideology: "自由至上主義",
+                stats: { stab: -0.2, tech: 0.1, gdp: 0.1, mil: -0.1 } 
+            }
         ];
         us.parliamentSize = 535;
         
@@ -1246,10 +1267,19 @@ function spawnNations() {
             p.seats = s;
             remaining -= s;
         });
-        us.parties[0].seats += remaining; // Give remainder to Dems
+        // Adjust for remainder (give to largest)
+        let largest = us.parties.reduce((prev, curr) => prev.support > curr.support ? prev : curr);
+        largest.seats += remaining;
 
-        us.president = { name: "ジョン・ドウ", ideology: "中道", term: 1 };
+        us.president = { 
+            name: "ジョン・ドウ", 
+            ideology: "リベラル", 
+            term: 1,
+            approval: 55,
+            party: "民主党"
+        };
         us.electionYear = year + 4;
+        us.midtermYear = year + 2;
         us.supportHistory = []; // Array of { year, parties: [{name, support}] }
         
         // Assign all land
@@ -1269,6 +1299,9 @@ function spawnNations() {
                 const cityName = us.generateCityName();
                 const city = new City(cityName, t, us.id);
                 
+                // Electoral Votes (Census: Base 3 + Random Pop Factor)
+                city.electoralVotes = 3 + Math.floor(Math.random() * 10); 
+
                 // Initialize local support with variance
                 let total = 0;
                 us.parties.forEach(p => {
@@ -2390,6 +2423,68 @@ function triggerImperialCollapse(n) {
 }
 
 function simulateDomesticPolitics(n) {
+    // 0. Approval Rating & Legislation Logic (New System)
+    if (!n.lastGdp) n.lastGdp = n.gdp;
+    
+    // Approval Drift
+    let targetApproval = 50;
+    if (n.gdp > n.lastGdp) targetApproval += 10;
+    if (n.stability > 80) targetApproval += 10;
+    if (n.stability < 40) targetApproval -= 20;
+    if (n.unrest > 20) targetApproval -= n.unrest / 2;
+    
+    n.president.approval += (targetApproval - n.president.approval) * 0.05;
+    n.president.approval = clamp(n.president.approval, 0, 100);
+    n.lastGdp = n.gdp;
+
+    // Check Divided Government
+    const rulingParty = n.parties.find(p => p.name === n.president.party);
+    const isDivided = rulingParty ? (rulingParty.seats < n.parliamentSize / 2) : false;
+    n.isDividedGovernment = isDivided;
+
+    // Legislation Attempt (Quarterly: once every ~3 ticks assuming sim speed)
+    // Actually run every tick with low probability
+    let legChance = 0.05; 
+    if (isDivided) legChance = 0.01; // Gridlock
+    else legChance = 0.10; // Unified
+
+    if (Math.random() < legChance && rulingParty) {
+        // Successful Legislation
+        const stats = rulingParty.stats;
+        let passed = true;
+        
+        // Apply Effects
+        if (stats) {
+            n.stability = clamp(n.stability + stats.stab, 0, 100);
+            n.gdp = Math.floor(n.gdp * (1 + stats.gdp * 0.005)); // Small compound growth
+            n.industry += stats.gdp * 2;
+            
+            // Military / Tech
+            if (stats.mil > 0) {
+                n.soldiers += 500;
+                n.tanks += 1;
+            } else if (stats.mil < 0) {
+                 n.soldiers = Math.max(0, n.soldiers - 500);
+            }
+            
+            if (stats.tech > 0 && Math.random() < stats.tech) {
+                 // Research boost
+                 n.industry += 1;
+            }
+        }
+        
+        n.president.approval = clamp(n.president.approval + 1, 0, 100);
+        // Log occasionally
+        if (Math.random() < 0.1) {
+            log(`政策通過: ${rulingParty.name}主導の法案が可決されました。(支持率: ${n.president.approval.toFixed(1)}%)`, "log-peace");
+        }
+    } else if (isDivided && Math.random() < 0.02) {
+        // Gridlock Event
+        n.president.approval = clamp(n.president.approval - 2, 0, 100);
+        n.stability = clamp(n.stability - 1, 0, 100);
+        log(`政治的膠着: ねじれ国会により法案が廃案となりました。(支持率: ${n.president.approval.toFixed(1)}%)`, "log-war");
+    }
+
     // 1. Local & National Support Fluctuation
     
     // a. Update City Level Support
@@ -2437,59 +2532,169 @@ function simulateDomesticPolitics(n) {
         if (n.supportHistory.length > 100) n.supportHistory.shift();
     }
 
-    // 2. Random Events
-    if (Math.random() < 0.05) {
+    // 2. Random Events (Enhanced)
+    if (Math.random() < 0.03) {
         const events = [
-            { msg: "経済ブーム！与党の支持率が上昇。", target: "ruling", effect: 5 },
-            { msg: "政治スキャンダル発覚。与党の支持率が低下。", target: "ruling", effect: -5 },
-            { msg: "大規模な抗議デモが発生。", target: "stability", effect: -10 },
-            { msg: "新技術の導入により国力が増大。", target: "gdp", effect: 100000 }
+            { msg: "経済ブーム！大統領の支持率が上昇。", target: "approval", effect: 5, type: "good" },
+            { msg: "不景気の波。大統領の支持率が低下。", target: "approval", effect: -5, type: "bad" },
+            { msg: "政治スキャンダル発覚。政権への信頼が揺らいでいます。", target: "approval", effect: -8, type: "bad" },
+            { msg: "大規模な抗議デモが発生。国内が不安定化しています。", target: "stability", effect: -10, type: "bad" },
+            { msg: "新技術の導入により国力が増大。", target: "gdp", effect: n.gdp * 0.05, type: "good" }
         ];
+
+        // Specific Hardcore Events
+        if (Math.random() < 0.1) {
+            events.push({ msg: "最高裁判事の空席が発生。後任指名を巡り対立が激化。", target: "stability", effect: -15, type: "bad" });
+        }
+        if (n.isDividedGovernment && Math.random() < 0.2) {
+            events.push({ msg: "予算不成立の危機！政府閉鎖の懸念が高まっています。", target: "approval_gdp", effect: -10, type: "bad" });
+        }
+        if (n.stability < 50 && Math.random() < 0.1) {
+            events.push({ msg: "州レベルでの離脱運動が観測されています。", target: "stability", effect: -5, type: "bad" });
+        }
+
         const evt = events[Math.floor(Math.random() * events.length)];
         
-        // Identify ruling party (most seats or president's party - for now assume first is ruling or match president ideology)
-        // Simplified: The party with max support is "ruling" in public eye for support swings
-        let rulingParty = n.parties.reduce((prev, current) => (prev.support > current.support) ? prev : current);
-        
-        if (evt.target === "ruling") {
-            rulingParty.support += evt.effect;
-            log(`国内ニュース: ${evt.msg}`, "log-info");
+        // Identify ruling party
+        let rulingParty = n.parties.find(p => p.name === n.president.party);
+        if (!rulingParty) rulingParty = n.parties[0];
+
+        if (evt.target === "approval") {
+            n.president.approval += evt.effect;
+            log(`国内ニュース: ${evt.msg} (支持率: ${n.president.approval.toFixed(1)}%)`, evt.type === "good" ? "log-peace" : "log-war");
         } else if (evt.target === "stability") {
             n.stability = clamp(n.stability + evt.effect, 0, 100);
             log(`国内ニュース: ${evt.msg}`, "log-war");
         } else if (evt.target === "gdp") {
             n.gdp += evt.effect;
+            n.president.approval += 2;
             log(`国内ニュース: ${evt.msg}`, "log-peace");
+        } else if (evt.target === "approval_gdp") {
+            n.president.approval += evt.effect;
+            n.gdp = Math.floor(n.gdp * 0.98); // 2% loss
+            log(`政治危機: ${evt.msg}`, "log-war");
         }
+        
+        // Clamp Approval
+        n.president.approval = clamp(n.president.approval, 0, 100);
+        
+        // Slight Party Support Shift based on event sentiment
+        if (evt.type === "good") rulingParty.support += 1;
+        else rulingParty.support -= 1;
     }
 
     // 3. Elections
+    
+    // Midterm Elections
+    if (year === n.midtermYear) {
+        log(`中間選挙: 国民の信を問う時が来ました。(大統領支持率: ${n.president.approval.toFixed(1)}%)`, "log-info");
+        n.midtermYear = year + 4;
+        
+        // Swing Calculation based on Approval
+        // e.g. Approval 40% -> -5% support swing against ruling party
+        let swing = (n.president.approval - 50) * 0.5; 
+        
+        // Apply swing to seat calculation (Temporary for seat allocation)
+        let totalSeats = n.parliamentSize;
+        let tempSupport = {};
+        let totalTempSupport = 0;
+        
+        n.parties.forEach(p => {
+            let s = p.support;
+            if (p.name === n.president.party) s += swing;
+            else s -= (swing / (n.parties.length - 1));
+            
+            s = Math.max(0, s);
+            tempSupport[p.name] = s;
+            totalTempSupport += s;
+        });
+        
+        // Assign Seats
+        let remaining = totalSeats;
+        n.parties.forEach(p => {
+            let ratio = tempSupport[p.name] / totalTempSupport;
+            let seats = Math.floor(ratio * totalSeats);
+            p.seats = seats;
+            remaining -= seats;
+        });
+        
+        // Give remainder to party with highest temp support
+        let winner = n.parties.reduce((prev, curr) => tempSupport[prev.name] > tempSupport[curr.name] ? prev : curr);
+        winner.seats += remaining;
+        
+        let resultMsg = swing > 0 ? "与党が議席を維持・拡大しました。" : "与党が議席を減らしました。";
+        log(`中間選挙結果: ${resultMsg}`, "log-peace");
+    }
+
+    // Presidential Elections
     if (year >= n.electionYear) {
         log(`大統領選挙: 選挙の年がやってきました！`, "log-info");
         n.electionYear = year + 4;
         
-        // Calculate Seats based on support
+        // 1. Concurrent Congressional Election (Base support, separate from Midterm swing)
+        // Reset seats based on current actual support (which drifts over time)
         let remainingSeats = n.parliamentSize;
         n.parties.forEach(p => {
             let seats = Math.floor((p.support / 100) * n.parliamentSize);
             p.seats = seats;
             remainingSeats -= seats;
         });
-        // Give remainder to top party
-        let winner = n.parties.reduce((prev, current) => (prev.support > current.support) ? prev : current);
-        winner.seats += remainingSeats;
+        let seatWinner = n.parties.reduce((prev, current) => (prev.support > current.support) ? prev : current);
+        seatWinner.seats += remainingSeats;
+
+        // 2. Electoral College (Presidential)
+        let evResults = {};
+        let totalEV = 0;
+        n.parties.forEach(p => evResults[p.name] = 0);
         
-        // Elect President
-        let newPresName = n.generateLeaderName();
-        n.president = {
-            name: newPresName,
-            ideology: winner.ideology,
-            term: 1
-        };
-        n.leader = newPresName; // Sync with standard prop
+        n.cities.forEach(city => {
+            let cityWinner = null;
+            let maxSupport = -1;
+            // Find local winner
+            n.parties.forEach(p => {
+                let support = city.partySupport[p.name] || 0;
+                if (support > maxSupport) {
+                    maxSupport = support;
+                    cityWinner = p;
+                }
+            });
+            
+            if (cityWinner) {
+                let ev = city.electoralVotes || 3;
+                evResults[cityWinner.name] += ev;
+                totalEV += ev;
+            }
+        });
         
-        log(`選挙結果: ${winner.name}が勝利し、${newPresName}が新大統領に就任しました。（思想: ${winner.ideology}）`, "log-peace");
-        n.addHistory(`選挙: ${winner.name}勝利, ${newPresName}就任`);
+        // Find Winner
+        let presWinnerName = Object.keys(evResults).reduce((a, b) => evResults[a] > evResults[b] ? a : b);
+        let presWinnerParty = n.parties.find(p => p.name === presWinnerName);
+        let winnerEV = evResults[presWinnerName];
+        
+        // Term Logic
+        let newPresName = "";
+        let isReelection = false;
+        
+        if (n.president.party === presWinnerName && n.president.term < 2) {
+            // Re-elected
+            newPresName = n.president.name;
+            n.president.term++;
+            isReelection = true;
+        } else {
+            // New President (Term limit or Party change)
+            newPresName = n.generateLeaderName();
+            n.president.term = 1;
+        }
+        
+        // Update President
+        n.president.name = newPresName;
+        n.president.party = presWinnerName;
+        n.president.ideology = presWinnerParty.ideology;
+        n.president.approval = 55; // Reset approval (Honeymoon)
+        n.leader = newPresName;
+
+        log(`大統領選結果: ${presWinnerName}が勝利しました (獲得選挙人: ${winnerEV}/${totalEV})。${newPresName}が大統領に就任。`, "log-peace");
+        n.addHistory(`選挙: ${presWinnerName}勝利 (${winnerEV}EV), ${newPresName}就任`);
     }
 }
 
@@ -3629,10 +3834,15 @@ function updateNationPanel() {
         if (n.president) {
             const info = document.getElementById('pol-pres-info');
             if (info) {
+                 const approvalColor = n.president.approval >= 60 ? '#2ecc71' : (n.president.approval < 40 ? '#e74c3c' : '#f1c40f');
+                 const govStatus = n.isDividedGovernment ? '<span style="color:#e74c3c">ねじれ (Divided)</span>' : '<span style="color:#2ecc71">安定多数 (Unified)</span>';
+                 
                  info.innerHTML = `
-                    <div class="stat-row"><span>大統領:</span> <span>${n.president.name}</span></div>
-                    <div class="stat-row"><span>思想:</span> <span>${n.president.ideology}</span></div>
-                    <div class="stat-row"><span>次期選挙:</span> <span>${n.electionYear}年</span></div>
+                    <div class="stat-row"><span>大統領:</span> <span style="font-weight:bold;">${n.president.name}</span> (${n.president.party})</div>
+                    <div class="stat-row"><span>支持率:</span> <span style="color:${approvalColor}; font-weight:bold;">${n.president.approval.toFixed(1)}%</span></div>
+                    <div class="stat-row"><span>任期:</span> <span>${n.president.term}期目</span></div>
+                    <div class="stat-row"><span>議会状況:</span> <span>${govStatus}</span></div>
+                    <div class="stat-row"><span>次期選挙:</span> <span>${n.electionYear}年 (中間: ${n.midtermYear}年)</span></div>
                  `;
             }
         }
