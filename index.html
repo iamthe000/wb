@@ -1531,7 +1531,7 @@ function spawnNations() {
 
         // 2. Create Axis
         const axis = new Nation(undefined, axisTile % width, Math.floor(axisTile / width));
-        axis.name = "大" + axis.baseName + "帝国";
+        axis.name = "枢軸国";
         axis.color = "#800000"; // Dark Red
         axis.sysBroad = "全体主義";
         axis.sysDetailed = "軍事独裁制";
@@ -1567,56 +1567,71 @@ function spawnNations() {
             }
         }
         
+        // Generate cities for Axis
+        const axisNumCities = Math.max(5, Math.floor(axis.tiles.length / 50));
+        for(let k=0; k<axisNumCities; k++) {
+             if(axis.tiles.length === 0) break;
+             const t = axis.tiles[Math.floor(Math.random() * axis.tiles.length)];
+             const tooClose = axis.cities.some(c => getDistSq(c.tileIdx, t) < 100);
+             if (!tooClose) {
+                 const cityName = axis.generateCityName();
+                 axis.cities.push(new City(cityName, t, axis.id));
+             }
+        }
+        
         // Remove used tiles from landTiles
         landTiles = landTiles.filter(t => ownerGrid[t] === -1);
         nations.push(axis);
 
-        // 3. Create Allies
-        const numAllies = Math.max(4, Math.floor(landTiles.length / 200));
-        for(let i=0; i<numAllies; i++) {
-             if(landTiles.length === 0) break;
+        // 3. Create Ally
+        if (landTiles.length > 0) {
              let rndIdx = Math.floor(Math.random() * landTiles.length);
              let tileIdx = landTiles[rndIdx];
-             landTiles.splice(rndIdx, 1);
+             // Do not remove from landTiles yet, as we will iterate
              
              const ally = new Nation(undefined, tileIdx % width, Math.floor(tileIdx / width));
+             ally.name = "連合国";
              ally.sysBroad = "民主主義";
              ally.sysDetailed = "議院内閣制";
              ally.generateParties();
              ally.tech = 3; 
-             ally.color = `hsl(${200 + Math.random()*40}, 70%, 50%)`; // Blue-ish
+             ally.color = "#00008b"; // Dark Blue
              
-             // Allies are weaker individually but strong together
-             ally.pop = 3000000;
-             ally.gdp = 500000;
-             ally.soldiers = 100000;
+             // Massive stats for massive nation
+             ally.pop = 100000000;
+             ally.gdp = 20000000;
+             ally.soldiers = 5000000;
+             
+             // Assign all remaining land tiles
+             landTiles.forEach(t => {
+                 if (ownerGrid[t] === -1) {
+                     ownerGrid[t] = ally.id;
+                     ally.tiles.push(t);
+                 }
+             });
+             
+             // Generate cities for the Ally (otherwise it's empty)
+             const numCities = Math.max(10, Math.floor(ally.tiles.length / 50));
+             for(let k=0; k<numCities; k++) {
+                 if(ally.tiles.length === 0) break;
+                 const t = ally.tiles[Math.floor(Math.random() * ally.tiles.length)];
+                 const tooClose = ally.cities.some(c => getDistSq(c.tileIdx, t) < 100);
+                 if (!tooClose) {
+                     const cityName = ally.generateCityName();
+                     ally.cities.push(new City(cityName, t, ally.id));
+                 }
+             }
              
              nations.push(ally);
+             
+             // 5. Diplomacy Setup
+             declareWar(ally, axis);
+             ally.relations[axis.id] = -100;
+             axis.relations[ally.id] = -100;
         }
-
-        // 4. Fill map
-        expandTerritoryInitial();
-
-        // 5. Diplomacy Setup
-        const allies = nations.filter(n => n.id !== axis.id);
         
         // Force update centroid for war lines
         nations.forEach(n => n.updateCentroid());
-
-        allies.forEach(a => {
-            // War with Axis
-            declareWar(a, axis); 
-            a.relations[axis.id] = -100;
-            axis.relations[a.id] = -100;
-
-            // Alliance with other Allies
-            allies.forEach(b => {
-                if (a !== b) {
-                    formAlliance(a, b);
-                    a.relations[b.id] = 100;
-                }
-            });
-        });
 
         // Log
         log("徹底抗戦シナリオ開始: 全世界が枢軸帝国に対し宣戦を布告しました。", "log-war");
