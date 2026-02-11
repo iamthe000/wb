@@ -175,6 +175,7 @@ if ('serviceWorker' in navigator) {
                     <option value="BLITZKRIEG" selected>電撃戦</option>
                     <option value="QUIET_SPARKS">静かなる火花</option>
                     <option value="GRACEFUL_US">優雅なる合衆国</option>
+                    <option value="TOTALLER_KRIEG">徹底抗戦</option>
                 </select>
             </div>
             <button id="btn-fill" style="margin-bottom:10px;">塗りつぶしモード: オフ</button>
@@ -1509,7 +1510,119 @@ function spawnNations() {
 
     nationIdCounter = 0;
 
-    if (activeScenario === 'GRACEFUL_US') {
+    if (activeScenario === 'TOTALLER_KRIEG') {
+        if (landTiles.length === 0) return;
+
+        // 1. Find Center Tile for Axis
+        let centerX = width / 2;
+        let centerY = height / 2;
+        let axisTile = -1;
+        let minDist = Infinity;
+
+        landTiles.forEach(t => {
+            let x = t % width;
+            let y = Math.floor(t / width);
+            let d = (x - centerX)**2 + (y - centerY)**2;
+            if (d < minDist) {
+                minDist = d;
+                axisTile = t;
+            }
+        });
+
+        // 2. Create Axis
+        const axis = new Nation(undefined, axisTile % width, Math.floor(axisTile / width));
+        axis.name = "大" + axis.baseName + "帝国";
+        axis.color = "#800000"; // Dark Red
+        axis.sysBroad = "全体主義";
+        axis.sysDetailed = "軍事独裁制";
+        axis.sovereign = "独裁者";
+        axis.govType = "軍事独裁制";
+        axis.tech = 4; // Futuristic
+        axis.pop = 50000000;
+        axis.gdp = 10000000;
+        axis.soldiers = 2000000; // Strong initial army
+        axis.tanks = 2000;
+        axis.ships = 100;
+        axis.stability = 100;
+        axis.isGrandEmpire = true;
+        
+        // Give Axis a head start in territory (Radius 12)
+        const axisRadius = 12;
+        const axisCenterY = Math.floor(axisTile / width);
+        const axisCenterX = axisTile % width;
+        
+        for(let dy = -axisRadius; dy <= axisRadius; dy++) {
+            for(let dx = -axisRadius; dx <= axisRadius; dx++) {
+                if(dx*dx + dy*dy <= axisRadius*axisRadius) {
+                    let nx = axisCenterX + dx;
+                    let ny = axisCenterY + dy;
+                    if(nx>=0 && nx<width && ny>=0 && ny<height) {
+                        let idx = ny*width + nx;
+                        if(grid[idx] !== 0 && ownerGrid[idx] === -1) {
+                            ownerGrid[idx] = axis.id;
+                            axis.tiles.push(idx);
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Remove used tiles from landTiles
+        landTiles = landTiles.filter(t => ownerGrid[t] === -1);
+        nations.push(axis);
+
+        // 3. Create Allies
+        const numAllies = Math.max(4, Math.floor(landTiles.length / 200));
+        for(let i=0; i<numAllies; i++) {
+             if(landTiles.length === 0) break;
+             let rndIdx = Math.floor(Math.random() * landTiles.length);
+             let tileIdx = landTiles[rndIdx];
+             landTiles.splice(rndIdx, 1);
+             
+             const ally = new Nation(undefined, tileIdx % width, Math.floor(tileIdx / width));
+             ally.sysBroad = "民主主義";
+             ally.sysDetailed = "議院内閣制";
+             ally.generateParties();
+             ally.tech = 3; 
+             ally.color = `hsl(${200 + Math.random()*40}, 70%, 50%)`; // Blue-ish
+             
+             // Allies are weaker individually but strong together
+             ally.pop = 3000000;
+             ally.gdp = 500000;
+             ally.soldiers = 100000;
+             
+             nations.push(ally);
+        }
+
+        // 4. Fill map
+        expandTerritoryInitial();
+
+        // 5. Diplomacy Setup
+        const allies = nations.filter(n => n.id !== axis.id);
+        
+        // Force update centroid for war lines
+        nations.forEach(n => n.updateCentroid());
+
+        allies.forEach(a => {
+            // War with Axis
+            declareWar(a, axis); 
+            a.relations[axis.id] = -100;
+            axis.relations[a.id] = -100;
+
+            // Alliance with other Allies
+            allies.forEach(b => {
+                if (a !== b) {
+                    formAlliance(a, b);
+                    a.relations[b.id] = 100;
+                }
+            });
+        });
+
+        // Log
+        log("徹底抗戦シナリオ開始: 全世界が枢軸帝国に対し宣戦を布告しました。", "log-war");
+        
+        return;
+    } else if (activeScenario === 'GRACEFUL_US') {
         if (landTiles.length === 0) return;
         
         // Create One Massive Nation
@@ -2382,6 +2495,7 @@ function grantIndependence(n, city) {
     newNation.stateStruct = '単一国家';
     newNation.ecoIdeology = n.ecoIdeology;
     newNation.govType = newNation.sysDetailed;
+    newNation.generateParties();
     
     newNation.color = `hsl(${Math.random()*360}, 60%, 60%)`;
     newNation.tech = n.tech;
@@ -2467,6 +2581,7 @@ function triggerCityRebellion(n, cities) {
         rebel.sovereign = '国民';
         rebel.regimeNumber = n.regimeNumber + 1;
         rebel.govType = rebel.sysDetailed;
+        rebel.generateParties();
         rebel.updateName();
     } else {
         const type = rebelTypes[Math.floor(Math.random() * rebelTypes.length)];
@@ -2475,6 +2590,7 @@ function triggerCityRebellion(n, cities) {
         if (type.gov === '革命政府' || type.gov === '臨時政府' || type.gov === '暫定政府') {
             rebel.sysBroad = '民主主義';
             rebel.sovereign = '国民';
+            rebel.generateParties();
         } else if (type.gov === '軍事評議会制' || type.gov === '暫定統治機構') {
             rebel.sysBroad = '権威主義';
             rebel.sovereign = '軍部';
@@ -2725,6 +2841,7 @@ function triggerImperialCollapse(n) {
         w.sysDetailed = sys.sysDetailed;
         w.govType = w.sysDetailed;
         w.sovereign = sys.sovereign;
+        if (w.sysBroad === '民主主義') w.generateParties();
         
         // Name generation
         if (center.type === 'city') {
@@ -3120,7 +3237,7 @@ function simulateTick() {
     }
 
     let tensionThreshold = (activeScenario === 'QUIET_SPARKS') ? 10 : 1000;
-    if (highTensionDuration > tensionThreshold) {
+    if (highTensionDuration > tensionThreshold && activeScenario !== 'TOTALLER_KRIEG') {
         // 全世界的な和平交渉 (必ずしも平和にはならない)
         let eventName = (activeScenario === 'QUIET_SPARKS') ? "10年戦争の弊害" : "千年戦争の疲弊";
         log(`${eventName}: 世界中で厭戦気分が高まり、各国で和平交渉が開始されました。`, "log-peace");
@@ -3849,6 +3966,13 @@ function concludePeace(n1, n2, type) {
     if (n2.getMilitaryPower() > n1.getMilitaryPower()) {
         winner = n2;
         loser = n1;
+    }
+
+    // 徹底抗戦シナリオ: 完全決着(傀儡化)以外はすべて拒否して戦争継続
+    if (activeScenario === 'TOTALLER_KRIEG') {
+        if (type !== 'PUPPET') {
+            return; // 戦争継続
+        }
     }
 
     n1.atWarWith = n1.atWarWith.filter(id => id !== n2.id);
