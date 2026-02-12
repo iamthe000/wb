@@ -1824,12 +1824,15 @@ function expandTerritoryInitial() {
 /**
  * メインループとシミュレーション
  */
-function loop() {
-    ctx.fillStyle = "#222";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+// バックグラウンド進行のためのWorker設定
+const gameWorker = new Worker('game-worker.js');
+gameWorker.onmessage = function(e) {
+    if (e.data === 'tick') {
+        updateGame();
+    }
+};
 
-    renderMap();
-    
+function updateGame() {
     if (!isDrawing && !isPaused) {
         frameCounter++;
         let speedMod = (activeScenario === 'QUIET_SPARKS') ? 5 : 1;
@@ -1870,6 +1873,15 @@ function loop() {
             }
         }
     }
+}
+
+function loop() {
+    ctx.fillStyle = "#222";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    renderMap();
+    
+    // Logic is now handled by updateGame via Worker
 
     if (selectedNationId !== -1) updateNationPanel();
 
