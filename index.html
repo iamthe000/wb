@@ -3412,7 +3412,19 @@ function simulateTick() {
         }
         
         // 技術発展 / 戦車製造
-        if (n.gdp > 5000 && n.tech < 4 && Math.random() < 0.01) n.tech++;
+        if (n.tech < 4 && Math.random() < 0.01) {
+            let nextTech = n.tech + 1;
+            let requiredYear = 0;
+            if (nextTech === 1) requiredYear = 0;
+            else if (nextTech === 2) requiredYear = 1700;
+            else if (nextTech === 3) requiredYear = 1900;
+            else if (nextTech === 4) requiredYear = 2020;
+            
+            if (n.gdp > 3000 * (n.tech + 1) && year >= requiredYear) {
+                n.tech++;
+                log(`${n.name}の技術レベルが「${TECH_LEVELS[n.tech]}」に向上しました！`, "log-info");
+            }
+        }
         if (n.tech >= 2 && milBudget > 100) {
             n.tanks++;
             milBudget -= 50;
