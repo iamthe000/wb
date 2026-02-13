@@ -158,7 +158,7 @@ if ('serviceWorker' in navigator) {
     
     <div id="sidebar">
         <h1>TERL-テリル 世界シュミレーター</h1>
-        <input type="file" id="file-input" style="display:none" accept=".terl,.json">
+        <input type="file" id="file-input" style="display:none" accept=".terl">
         
         <div id="menu-panel" class="panel">
             <h2>1. マップデザイン</h2>
@@ -4686,7 +4686,7 @@ function saveGame() {
         frameCounter, simSpeed
     };
     
-    const blob = new Blob([JSON.stringify(saveData)], {type: 'application/json'});
+    const blob = new Blob([JSON.stringify(saveData)], {type: 'application/octet-stream'});
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
