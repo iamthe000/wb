@@ -1153,7 +1153,7 @@ class Nation {
     constructor(id, x, y) {
         this.id = (id !== undefined) ? id : nationIdCounter++;
         this.color = `hsl(${Math.random()*360}, 70%, 50%)`;
-        this.cultureType = Math.random() < 0.4 ? 'KANJI' : 'ALPHABET';
+        this.cultureType = Math.random() < 0.15 ? 'KANJI' : 'ALPHABET';
         this.baseName = this.generateBaseName();
         this.regimeNumber = 1;
         this.religion = RELIGIONS[Math.floor(Math.random() * RELIGIONS.length)];
