@@ -158,6 +158,7 @@ if ('serviceWorker' in navigator) {
     
     <div id="sidebar">
         <h1>TERL-テリル 世界シュミレーター</h1>
+        <input type="file" id="file-input" style="display:none" accept=".terl,.json">
         
         <div id="menu-panel" class="panel">
             <h2>1. マップデザイン</h2>
@@ -180,6 +181,8 @@ if ('serviceWorker' in navigator) {
             </div>
             <button id="btn-fill" style="margin-bottom:10px;">塗りつぶしモード: オフ</button>
             <button id="btn-generate">世界を生成 (シミュレーション開始)</button>
+            <hr style="border-color:#555; margin:15px 0;">
+            <button id="btn-load-menu" style="background:#e67e22;">📂 ロード (.terl)</button>
         </div>
 
         <div id="sim-panel" class="panel" style="display:none;">
@@ -190,6 +193,9 @@ if ('serviceWorker' in navigator) {
             <div class="stat-row"><span>覇権国:</span> <span id="info-hegemon" style="font-weight:bold;">なし</span></div>
             <button id="btn-ranking" style="margin-bottom:10px; background:#6c5ce7; border-color:#8e44ad;">📊 国力ランキング</button>
             <button id="btn-map-mode" style="margin-bottom:10px;">地図モード: 政治</button>
+            <hr style="border-color:#555; margin:15px 0;">
+            <button id="btn-save" style="margin-bottom:5px; background:#27ae60;">💾 セーブ (.terl)</button>
+            <button id="btn-load-sim" style="background:#e67e22;">📂 ロード (.terl)</button>
         </div>
 
         <div id="nation-panel" class="panel" style="display:none;">
@@ -612,6 +618,20 @@ function setupInput() {
     document.getElementById('btn-ranking').addEventListener('click', () => {
         openRankingModal();
     });
+
+    // Save/Load
+    document.getElementById('btn-save').addEventListener('click', saveGame);
+    
+    const fileInput = document.getElementById('file-input');
+    fileInput.addEventListener('change', (e) => {
+        if (e.target.files.length > 0) {
+            loadGame(e.target.files[0]);
+            e.target.value = ''; // Reset
+        }
+    });
+
+    document.getElementById('btn-load-menu').addEventListener('click', () => fileInput.click());
+    document.getElementById('btn-load-sim').addEventListener('click', () => fileInput.click());
 }
 
 function openRelationsModal() {
@@ -4652,6 +4672,85 @@ function drawStar(cx, cy, spikes, outerRadius, innerRadius, color) {
     ctx.stroke();
     ctx.fillStyle = color;
     ctx.fill();
+}
+
+function saveGame() {
+    const saveData = {
+        version: 1,
+        width, height,
+        currentScenario, activeScenario,
+        grid, elevationGrid, ownerGrid,
+        nations, nationIdCounter,
+        year, worldTension,
+        hegemonId, hegemonStatus, highTensionDuration,
+        frameCounter, simSpeed
+    };
+    
+    const blob = new Blob([JSON.stringify(saveData)], {type: 'application/json'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `terl_save_Y${year}.terl`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    log("ゲームをセーブしました。", "log-info");
+}
+
+function loadGame(file) {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        try {
+            const data = JSON.parse(e.target.result);
+            
+            width = data.width;
+            height = data.height;
+            currentScenario = data.currentScenario;
+            activeScenario = data.activeScenario;
+            grid = data.grid;
+            elevationGrid = data.elevationGrid;
+            ownerGrid = data.ownerGrid;
+            nations = data.nations;
+            nationIdCounter = data.nationIdCounter;
+            year = data.year;
+            worldTension = data.worldTension;
+            hegemonId = data.hegemonId;
+            hegemonStatus = data.hegemonStatus;
+            highTensionDuration = data.highTensionDuration;
+            frameCounter = data.frameCounter;
+            simSpeed = data.simSpeed;
+            
+            // Rehydrate
+            nations.forEach(n => {
+                Object.setPrototypeOf(n, Nation.prototype);
+                n.cities.forEach(c => Object.setPrototypeOf(c, City.prototype));
+            });
+            
+            updateContinents();
+            
+            // Update UI
+            document.getElementById('info-year').innerText = year;
+            document.getElementById('top-ui-year').innerText = year;
+            document.getElementById('info-tension').innerText = worldTension.toFixed(1) + "%";
+            document.getElementById('top-ui-tension').innerText = worldTension.toFixed(1) + "%";
+            document.getElementById('simSpeed').value = simSpeed;
+            
+            // Switch to sim mode
+            document.getElementById('menu-panel').style.display = 'none';
+            document.getElementById('sim-panel').style.display = 'block';
+            document.getElementById('nation-panel').style.display = 'none';
+            isDrawing = false;
+            isPaused = true;
+            mapDirty = true;
+            
+            log("ゲームをロードしました。", "log-info");
+        } catch(err) {
+            console.error(err);
+            alert("ロードに失敗しました。");
+        }
+    };
+    reader.readAsText(file);
 }
 
 </script>
