@@ -18,6 +18,58 @@ const RELIGIONS = ['太陽神教', '海霊信仰', '機械崇拝', '自然の秩
 const TECH_LEVELS = ['原始的', '農耕社会', '工業化', '現代的', '未来的'];
 const KANJI_CHARS = ["龍", "鳳", "蒼", "天", "央", "日", "月", "星", "雲", "雷", "風", "火", "水", "土", "木", "金", "銀", "鉄", "皇", "王", "帝", "聖", "神", "魔", "霊", "幻", "夢", "愛", "恋", "哀", "愁", "喜", "楽", "怒", "憎", "善", "悪", "真", "偽", "正", "邪", "明", "暗", "白", "黒", "赤", "青", "黄", "緑", "紫", "紅", "碧", "朱", "玄", "旭", "暁", "曙", "霞", "霧", "嵐", "雪", "氷", "霜", "露", "雨", "空", "海", "洋", "湖", "河", "川", "山", "岳", "峰", "丘", "谷", "峡", "洞", "岩", "石", "砂", "泥", "土", "田", "畑", "森", "林", "樹", "草", "花", "葉", "根", "実", "種", "芽", "翼", "羽", "毛", "皮", "肉", "骨", "血", "心", "眼", "耳", "口", "手", "足", "身", "力", "知", "智", "信", "義", "礼", "仁", "徳", "道", "法", "理", "気", "術", "芸", "文", "武", "戦", "争", "兵", "軍", "国", "邦", "都", "京", "市", "町", "村", "里", "家", "宮", "殿", "城", "塞", "塔", "門", "橋", "道", "路", "港", "津", "浦", "浜", "岸", "島"];
 
+function getNationSuffix(n) {
+    if (n.isPuppet) {
+        let masterName = "";
+        if (n.masterId !== -1) {
+            const master = nations.find(m => m.id === n.masterId);
+            if (master) masterName = master.name;
+        }
+        if (masterName) {
+            return { prefix: masterName + "領", suffix: "" };
+        } else {
+            return { prefix: "", suffix: "傀儡統治機構国" };
+        }
+    }
+    
+    if (n.isGrandEmpire) {
+        return { prefix: "大", suffix: "帝国" };
+    }
+
+    let suffix = "国";
+    // Suffix logic based on detailed political system
+    if (n.sysDetailed && (n.sysDetailed.includes('君主') || n.sovereign === '君主')) {
+        if (n.sysDetailed === '帝国' || (n.id % 5 === 0)) suffix = "帝国";
+        else suffix = "王国";
+        if (n.sysDetailed === '公国') suffix = "公国";
+    } else if (n.sysDetailed && (n.sysDetailed.includes('軍事') || n.sovereign === '軍部')) {
+        suffix = "軍事政権";
+    } else if (n.sysDetailed && (n.sysDetailed.includes('神権') || n.sovereign === '宗教指導者')) {
+        suffix = "神聖国";
+    } else if (n.sysBroad === '民主主義') {
+        suffix = "共和国";
+        if (n.stateStruct === '連邦国家') suffix = "連邦" + suffix;
+        if (n.stateStruct === '国家連合') suffix = "連合";
+        if (n.sysDetailed === '大統領制' && n.stateStruct === '連邦国家') suffix = "合衆国"; // Flavor override
+    } else if (n.sysBroad === '全体主義') {
+        if (n.ecoIdeology && (n.ecoIdeology.includes('計画') || n.ecoIdeology.includes('統制'))) suffix = "社会主義共和国";
+        else suffix = "独裁国";
+    }
+    
+    // Special cases
+    if (n.sysDetailed === "革命政府") suffix = "革命政府";
+    if (n.sysDetailed === "臨時政府") suffix = "臨時政府";
+    if (n.sysDetailed === "正統政府") suffix = "正統政府";
+    if (n.sysDetailed === "暫定政府") suffix = "暫定政府";
+    if (n.sysDetailed === "暫定統治機構") suffix = "暫定統治機構";
+
+    if (n.sysBroad === '民主主義' && n.regimeNumber > 1) {
+        suffix += "第" + n.regimeNumber + "政";
+    }
+    
+    return { prefix: "", suffix: suffix };
+}
+
 const POLITICAL_SYSTEMS = {
     ECONOMIC: ['自由放任主義', '社会的市場経済', '混合経済', '計画経済', '統制経済', '協同組合主義', '重商主義', '農本主義'],
     BROAD: ['民主主義', '権威主義', '全体主義'],
@@ -403,6 +455,48 @@ function setupInput() {
 
     document.getElementById('btn-load-menu').addEventListener('click', () => fileInput.click());
     document.getElementById('btn-load-sim').addEventListener('click', () => fileInput.click());
+
+    // Edit Nation Modal
+    document.getElementById('btn-edit-nation').addEventListener('click', openEditNationModal);
+    document.getElementById('edit-n-basename').addEventListener('input', updateEditPreview);
+    document.getElementById('edit-n-sys-broad').addEventListener('change', (e) => {
+        updateDetailedAndSovereignOptions(e.target.value);
+        updateEditPreview();
+    });
+    document.getElementById('edit-n-sys-detailed').addEventListener('change', updateEditPreview);
+    document.getElementById('edit-n-struct').addEventListener('change', updateEditPreview);
+    document.getElementById('edit-n-sov').addEventListener('change', updateEditPreview);
+    document.getElementById('edit-n-eco').addEventListener('change', updateEditPreview);
+
+    document.getElementById('btn-edit-cancel').addEventListener('click', () => {
+        document.getElementById('edit-nation-modal').style.display = 'none';
+    });
+
+    document.getElementById('btn-edit-save').addEventListener('click', () => {
+        if (selectedNationId === -1) return;
+        const n = nations.find(nat => nat.id === selectedNationId);
+        if (!n) return;
+
+        n.baseName = document.getElementById('edit-n-basename').value;
+        n.sysBroad = document.getElementById('edit-n-sys-broad').value;
+        n.sysDetailed = document.getElementById('edit-n-sys-detailed').value;
+        n.govType = n.sysDetailed;
+        n.stateStruct = document.getElementById('edit-n-struct').value;
+        n.sovereign = document.getElementById('edit-n-sov').value;
+        n.ecoIdeology = document.getElementById('edit-n-eco').value;
+
+        // If changed to democracy and had no parties, generate them
+        if (n.sysBroad === '民主主義' && (!n.parties || n.parties.length === 0)) {
+            n.generateParties();
+        }
+
+        n.updateName();
+        updateNationPanel();
+        mapDirty = true;
+        document.getElementById('edit-nation-modal').style.display = 'none';
+        
+        log(`${n.name}の国家体制が編集されました。`, "log-info");
+    });
 }
 
 function openRelationsModal() {
@@ -1142,57 +1236,8 @@ class Nation {
     }
 
     updateName() {
-        let proposedName = "";
-        if (this.isPuppet) {
-            let masterName = "";
-            if (this.masterId !== -1) {
-                const master = nations.find(m => m.id === this.masterId);
-                if (master) masterName = master.name;
-            }
-            if (masterName) {
-                proposedName = masterName + "領" + this.baseName;
-            } else {
-                proposedName = this.baseName + "傀儡統治機構国";
-            }
-        } else {
-            if (this.isGrandEmpire) {
-                proposedName = "大" + this.baseName + "帝国";
-            } else {
-                let suffix = "国";
-
-                // Suffix logic based on detailed political system
-                if (this.sysDetailed.includes('君主') || this.sovereign === '君主') {
-                    if (this.sysDetailed === '帝国' || (this.id % 5 === 0)) suffix = "帝国";
-                    else suffix = "王国";
-                    if (this.sysDetailed === '公国') suffix = "公国";
-                } else if (this.sysDetailed.includes('軍事') || this.sovereign === '軍部') {
-                    suffix = "軍事政権";
-                } else if (this.sysDetailed.includes('神権') || this.sovereign === '宗教指導者') {
-                    suffix = "神聖国";
-                } else if (this.sysBroad === '民主主義') {
-                    suffix = "共和国";
-                    if (this.stateStruct === '連邦国家') suffix = "連邦" + suffix;
-                    if (this.stateStruct === '国家連合') suffix = "連合";
-                    if (this.sysDetailed === '大統領制' && this.stateStruct === '連邦国家') suffix = "合衆国"; // Flavor override
-                } else if (this.sysBroad === '全体主義') {
-                    if (this.ecoIdeology.includes('計画') || this.ecoIdeology.includes('統制')) suffix = "社会主義共和国";
-                    else suffix = "独裁国";
-                }
-                
-                // Special cases
-                if (this.sysDetailed === "革命政府") suffix = "革命政府";
-                if (this.sysDetailed === "臨時政府") suffix = "臨時政府";
-                if (this.sysDetailed === "正統政府") suffix = "正統政府";
-                if (this.sysDetailed === "暫定政府") suffix = "暫定政府";
-                if (this.sysDetailed === "暫定統治機構") suffix = "暫定統治機構";
-
-                if (this.sysBroad === '民主主義' && this.regimeNumber > 1) {
-                    proposedName = this.baseName + suffix + "第" + this.regimeNumber + "政";
-                } else {
-                    proposedName = this.baseName + suffix;
-                }
-            }
-        }
+        const nameInfo = getNationSuffix(this);
+        let proposedName = nameInfo.prefix + this.baseName + nameInfo.suffix;
 
         // Ensure uniqueness
         if (!isNationNameTaken(proposedName, this.id)) {
@@ -4735,4 +4780,75 @@ function loadGame(file) {
         }
     };
     reader.readAsText(file);
+}
+
+function populateSelect(id, options) {
+    const el = document.getElementById(id);
+    el.innerHTML = '';
+    options.forEach(opt => {
+        const o = document.createElement('option');
+        o.value = opt;
+        o.innerText = opt;
+        el.appendChild(o);
+    });
+}
+
+function openEditNationModal() {
+    if (selectedNationId === -1) return;
+    const n = nations.find(nat => nat.id === selectedNationId);
+    if (!n) return;
+
+    const modal = document.getElementById('edit-nation-modal');
+    document.getElementById('edit-n-basename').value = n.baseName;
+    
+    populateSelect('edit-n-sys-broad', POLITICAL_SYSTEMS.BROAD);
+    document.getElementById('edit-n-sys-broad').value = n.sysBroad;
+    
+    updateDetailedAndSovereignOptions(n.sysBroad);
+    document.getElementById('edit-n-sys-detailed').value = n.sysDetailed || n.govType;
+    document.getElementById('edit-n-sov').value = n.sovereign;
+    
+    populateSelect('edit-n-struct', POLITICAL_SYSTEMS.STRUCTURE);
+    document.getElementById('edit-n-struct').value = n.stateStruct;
+    
+    populateSelect('edit-n-eco', POLITICAL_SYSTEMS.ECONOMIC);
+    document.getElementById('edit-n-eco').value = n.ecoIdeology;
+    
+    updateEditPreview();
+    modal.style.display = 'block';
+}
+
+function updateDetailedAndSovereignOptions(broad) {
+    populateSelect('edit-n-sys-detailed', POLITICAL_SYSTEMS.DETAILED[broad]);
+    populateSelect('edit-n-sov', POLITICAL_SYSTEMS.SOVEREIGN[broad]);
+}
+
+function updateEditPreview() {
+    const baseName = document.getElementById('edit-n-basename').value;
+    const sysBroad = document.getElementById('edit-n-sys-broad').value;
+    const sysDetailed = document.getElementById('edit-n-sys-detailed').value;
+    const stateStruct = document.getElementById('edit-n-struct').value;
+    const sovereign = document.getElementById('edit-n-sov').value;
+    const ecoIdeology = document.getElementById('edit-n-eco').value;
+    
+    if (selectedNationId === -1) return;
+    const n = nations.find(nat => nat.id === selectedNationId);
+    if (!n) return;
+
+    // Create a dummy object to use getNationSuffix
+    const dummy = {
+        id: n.id,
+        isPuppet: n.isPuppet,
+        masterId: n.masterId,
+        isGrandEmpire: n.isGrandEmpire,
+        sysBroad: sysBroad,
+        sysDetailed: sysDetailed,
+        stateStruct: stateStruct,
+        sovereign: sovereign,
+        ecoIdeology: ecoIdeology,
+        regimeNumber: n.regimeNumber
+    };
+    
+    const nameInfo = getNationSuffix(dummy);
+    document.getElementById('edit-n-preview').innerText = nameInfo.prefix + baseName + nameInfo.suffix;
 }
