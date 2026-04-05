@@ -154,6 +154,7 @@ let ownerGrid = []; // ID of the nation owning this tile (-1 for none)
 let nations = [];
 let nationIdCounter = 0;
 let isDrawing = true;
+let isTerrainEditMode = false;
 let isFillMode = false;
 let currentBrush = 1; // 1:Land, 0:Water
 let mapMode = 'political'; // political or terrain
@@ -397,17 +398,65 @@ function setupInput() {
         simSpeed = parseInt(e.target.value);
     });
 
-    document.getElementById('btn-fill').addEventListener('click', (e) => {
+    function syncEditButtons() {
+        const fillBtn = document.getElementById('btn-fill');
+        const fillBtnSim = document.getElementById('btn-fill-sim');
+        const brushBtn = document.getElementById('btn-brush');
+        const brushBtnSim = document.getElementById('btn-brush-sim');
+
+        const fillText = `塗りつぶしモード: ${isFillMode ? 'オン' : 'オフ'}`;
+        const fillBg = isFillMode ? '#4db8ff' : '#34495e';
+        const fillColor = isFillMode ? '#000' : '#ecf0f1';
+
+        [fillBtn, fillBtnSim].forEach(btn => {
+            if (btn) {
+                btn.innerText = fillText;
+                btn.style.background = fillBg;
+                btn.style.color = fillColor;
+            }
+        });
+
+        const brushText = `ブラシ: ${currentBrush === 1 ? '陸地' : '海'}`;
+        const brushBg = currentBrush === 1 ? '#34495e' : '#2980b9';
+
+        [brushBtn, brushBtnSim].forEach(btn => {
+            if (btn) {
+                btn.innerText = brushText;
+                btn.style.background = brushBg;
+            }
+        });
+    }
+
+    document.getElementById('btn-fill').addEventListener('click', () => {
         isFillMode = !isFillMode;
-        e.target.innerText = `塗りつぶしモード: ${isFillMode ? 'オン' : 'オフ'}`;
-        e.target.style.background = isFillMode ? '#4db8ff' : '#34495e';
-        e.target.style.color = isFillMode ? '#000' : '#ecf0f1';
+        syncEditButtons();
     });
 
-    document.getElementById('btn-brush').addEventListener('click', (e) => {
+    document.getElementById('btn-fill-sim').addEventListener('click', () => {
+        isFillMode = !isFillMode;
+        syncEditButtons();
+    });
+
+    document.getElementById('btn-brush').addEventListener('click', () => {
         currentBrush = currentBrush === 1 ? 0 : 1;
-        e.target.innerText = `ブラシ: ${currentBrush === 1 ? '陸地' : '海'}`;
-        e.target.style.background = currentBrush === 1 ? '#34495e' : '#2980b9';
+        syncEditButtons();
+    });
+
+    document.getElementById('btn-brush-sim').addEventListener('click', () => {
+        currentBrush = currentBrush === 1 ? 0 : 1;
+        syncEditButtons();
+    });
+
+    document.getElementById('btn-terrain-edit').addEventListener('click', (e) => {
+        isTerrainEditMode = !isTerrainEditMode;
+        e.target.innerText = `🛠 地形編集: ${isTerrainEditMode ? 'オン' : 'オフ'}`;
+        e.target.style.background = isTerrainEditMode ? '#e67e22' : '#d35400';
+        document.getElementById('sim-edit-tools').style.display = isTerrainEditMode ? 'block' : 'none';
+        
+        if (isTerrainEditMode) {
+            // 地形編集モード時は、一時的に地図モードを「地形」に切り替えると編集しやすいかも
+            // ただし強制はしない
+        }
     });
 
     document.getElementById('btn-history').addEventListener('click', () => {
@@ -716,7 +765,7 @@ function renderRankingContent() {
  * 描画モードの処理
  */
 function handleDraw(e) {
-    if (!mousePressed || !isDrawing) return;
+    if (!mousePressed || (!isDrawing && !isTerrainEditMode)) return;
     
     const {x, y} = getGridPos(e);
 
@@ -728,7 +777,6 @@ function handleDraw(e) {
             // mousemove中に塗りつぶしを連打すると重いので、mousedownの時だけにする工夫が必要
             if (e.type === 'mousedown' || e.type === 'touchstart') {
                 floodFill(x, y, targetType);
-                mapDirty = true;
             }
         } else {
             // ブラシサイズ（少し太く）
@@ -738,10 +786,7 @@ function handleDraw(e) {
                     const ny = y+dy;
                     if(nx>=0 && nx<width && ny>=0 && ny<height){
                         const idx = ny * width + nx;
-                        if (grid[idx] !== targetType) {
-                            grid[idx] = targetType;
-                            mapDirty = true;
-                        }
+                        applyTileChange(idx, targetType);
                     }
                 }
             }
@@ -845,7 +890,7 @@ function floodFill(startX, startY, newType) {
         const idx = y * width + x;
 
         if (grid[idx] === oldType) {
-            grid[idx] = newType;
+            applyTileChange(idx, newType);
 
             if (x > 0) stack.push([x - 1, y]);
             if (x < width - 1) stack.push([x + 1, y]);
@@ -859,7 +904,7 @@ function floodFill(startX, startY, newType) {
  * 選択とホバー
  */
 function handleSelect(e) {
-    if (isDrawing) return;
+    if (isDrawing || isTerrainEditMode) return;
     const {x, y} = getGridPos(e);
     if (x >= 0 && x < width && y >= 0 && y < height) {
         const idx = y * width + x;
@@ -877,7 +922,7 @@ function handleSelect(e) {
 
 function handleHover(e) {
     const hoverInfo = document.getElementById('hover-info');
-    if (isDrawing) {
+    if (isDrawing || isTerrainEditMode) {
         hoverInfo.style.display = 'none';
         return;
     }
@@ -902,6 +947,33 @@ function handleHover(e) {
     hoverInfo.style.display = 'none';
 }
 
+function applyTileChange(idx, targetType) {
+    const oldType = grid[idx];
+    if (oldType === targetType) return;
+
+    grid[idx] = targetType;
+    mapDirty = true;
+
+    // Handle terrain change logic during simulation (or any time owner exists)
+    if (targetType === 0) { // To Water
+        const ownerId = ownerGrid[idx];
+        if (ownerId !== -1) {
+            const nation = nations.find(n => n.id === ownerId);
+            if (nation) {
+                // Remove from tiles array
+                nation.tiles = nation.tiles.filter(t => t !== idx);
+                // Remove city if exists on this tile
+                nation.cities = nation.cities.filter(c => c.tileIdx !== idx);
+            }
+            ownerGrid[idx] = -1;
+        }
+        elevationGrid[idx] = 0;
+        militaryGrid[idx] = 0;
+    } else if (oldType === 0) { // From Water to Land/Mountain/River
+        elevationGrid[idx] = 0.5;
+    }
+}
+
 function getGridPos(e) {
     const rect = canvas.getBoundingClientRect();
     const clientX = e.clientX !== undefined ? e.clientX : (e.touches && e.touches[0] ? e.touches[0].clientX : 0);
@@ -919,6 +991,11 @@ function getGridPos(e) {
  */
 function generateWorld() {
     isDrawing = false;
+    isTerrainEditMode = false;
+    document.getElementById('btn-terrain-edit').innerText = '🛠 地形編集: オフ';
+    document.getElementById('btn-terrain-edit').style.background = '#d35400';
+    document.getElementById('sim-edit-tools').style.display = 'none';
+
     document.getElementById('menu-panel').style.display = 'none';
     document.getElementById('sim-panel').style.display = 'block';
 
@@ -4770,6 +4847,11 @@ function loadGame(file) {
             document.getElementById('sim-panel').style.display = 'block';
             document.getElementById('nation-panel').style.display = 'none';
             isDrawing = false;
+            isTerrainEditMode = false;
+            document.getElementById('btn-terrain-edit').innerText = '🛠 地形編集: オフ';
+            document.getElementById('btn-terrain-edit').style.background = '#d35400';
+            document.getElementById('sim-edit-tools').style.display = 'none';
+            
             isPaused = true;
             mapDirty = true;
             
