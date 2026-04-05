@@ -3481,7 +3481,8 @@ function simulateTick() {
         handlePolitics(n);
 
         // 未開拓地の植民
-        if (n.tech >= 3 && Math.random() < 0.05) { // 5% chance per tick, only for Modern+
+        const colonizationChance = 0.01 + (n.tech * 0.02); // 1% to 9% depending on tech
+        if (n.tech >= 1 && Math.random() < colonizationChance) { 
             // ランダムに領土をピックして、隣接する未開拓地(ownerGrid == -1)を探す
             const sampleTiles = [];
             for(let i=0; i<10; i++) {
