@@ -97,6 +97,7 @@ let currentScenario = 'BLITZKRIEG';
 let activeScenario = 'BLITZKRIEG'; // Scenario used for generation (latched)
 let grid = []; // 0:Water, 1:Land, 2:Mountain, 3:River, 4:Major River
 let elevationGrid = []; // 0.0 - 1.0
+let militaryGrid = []; // 0.0 - 1.0 (Troop density)
 let ownerGrid = []; // ID of the nation owning this tile (-1 for none)
 let nations = [];
 let nationIdCounter = 0;
@@ -207,6 +208,7 @@ function initGrid(size) {
     height = size;
     grid = new Array(width * height).fill(0);
     elevationGrid = new Array(width * height).fill(0);
+    militaryGrid = new Array(width * height).fill(0);
     ownerGrid = new Array(width * height).fill(-1);
     continentMap = new Array(width * height).fill(-1);
     nations = [];
@@ -327,8 +329,16 @@ function setupInput() {
     });
 
     document.getElementById('btn-map-mode').addEventListener('click', (e) => {
-        mapMode = (mapMode === 'political' ? 'terrain' : 'political');
-        e.target.innerText = `地図モード: ${mapMode === 'political' ? '政治' : '地形'}`;
+        if (mapMode === 'political') {
+            mapMode = 'terrain';
+            e.target.innerText = '地図モード: 地形';
+        } else if (mapMode === 'terrain') {
+            mapMode = 'military';
+            e.target.innerText = '地図モード: 軍事';
+        } else {
+            mapMode = 'political';
+            e.target.innerText = '地図モード: 政治';
+        }
     });
 
     document.getElementById('simSpeed').addEventListener('input', (e) => {
@@ -642,6 +652,92 @@ function handleDraw(e) {
                 }
             }
         }
+    }
+}
+
+function updateMilitaryGrid() {
+    // ターゲット密度マップの作成
+    let targetGrid = new Array(width * height).fill(0);
+
+    nations.forEach(n => {
+        if (n.isDead) return;
+
+        // 軍事力に応じた総軍事ポイント
+        let totalMilPoints = n.getMilitaryPower() / 1000; // スケール調整
+        if (totalMilPoints <= 0) return;
+
+        // 重点地区の特定
+        let hotSpots = [];
+
+        // 1. 最前線 (交戦中の国と接しているタイル)
+        if (n.atWarWith.length > 0) {
+            n.tiles.forEach(tIdx => {
+                const cx = tIdx % width;
+                const cy = Math.floor(tIdx / width);
+                let isFrontline = false;
+                [[0, 1], [0, -1], [1, 0], [-1, 0]].forEach(([dx, dy]) => {
+                    const nx = cx + dx;
+                    const ny = cy + dy;
+                    if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
+                        const neighborOwner = ownerGrid[ny * width + nx];
+                        if (n.atWarWith.includes(neighborOwner)) {
+                            isFrontline = true;
+                        }
+                    }
+                });
+                if (isFrontline) {
+                    hotSpots.push({ idx: tIdx, weight: 10 });
+                }
+            });
+        }
+
+        // 2. 都市 (防衛拠点)
+        n.cities.forEach((city, idx) => {
+            hotSpots.push({ idx: city.tileIdx, weight: idx === 0 ? 15 : 5 });
+        });
+
+        // 重点地区がない場合は首都またはランダムな領土を拠点にする
+        if (hotSpots.length === 0) {
+            if (n.cities.length > 0) {
+                hotSpots.push({ idx: n.cities[0].tileIdx, weight: 1 });
+            } else if (n.tiles.length > 0) {
+                hotSpots.push({ idx: n.tiles[Math.floor(Math.random() * n.tiles.length)], weight: 1 });
+            }
+        }
+
+        // ポイントの配分
+        let totalWeight = hotSpots.reduce((sum, s) => sum + s.weight, 0);
+        hotSpots.forEach(s => {
+            const points = (s.weight / totalWeight) * totalMilPoints;
+            // 周囲に拡散
+            const cx = s.idx % width;
+            const cy = Math.floor(s.idx / width);
+            const range = 3;
+            for (let dy = -range; dy <= range; dy++) {
+                for (let dx = -range; dx <= range; dx++) {
+                    const nx = cx + dx;
+                    const ny = cy + dy;
+                    if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
+                        const dist = Math.sqrt(dx * dx + dy * dy);
+                        const falloff = Math.max(0, 1 - dist / (range + 1));
+                        targetGrid[ny * width + nx] += points * falloff;
+                    }
+                }
+            }
+        });
+    });
+
+    // 現在のグリッドをターゲットへ近づける (スムーズな移動)
+    for (let i = 0; i < militaryGrid.length; i++) {
+        const current = militaryGrid[i];
+        const target = targetGrid[i];
+        // 変化速度
+        militaryGrid[i] = current + (target - current) * 0.1;
+        // 減衰 (所有者がいない場合など)
+        if (ownerGrid[i] === -1) {
+            militaryGrid[i] *= 0.9;
+        }
+        if (militaryGrid[i] < 0.01) militaryGrid[i] = 0;
     }
 }
 
@@ -1796,7 +1892,45 @@ function renderMap() {
             if (type === 4) color = COLORS.MAJOR_RIVER;
 
             // 描画ロジックの分離
-            if (mapMode === 'political' && owner !== -1 && !isDrawing) {
+            if (mapMode === 'military' && !isDrawing) {
+                // 軍事モード: ヒートマップ表示
+                const density = militaryGrid[i] || 0;
+                
+                // ベースとなる地形色 (少し暗め)
+                let baseR=26, baseG=42, baseB=58; // WATER
+                if (type === 1) { baseR=30; baseG=40; baseB=30; } // LAND
+                if (type === 2) { baseR=40; baseG=40; baseB=40; } // MOUNTAIN
+                if (type === 3 || type === 4) { baseR=20; baseG=60; baseB=100; } // RIVER
+
+                if (density > 0) {
+                    // 密度に応じた色 (青 -> 緑 -> 黄 -> 赤)
+                    // densityの値を0-1にクランプして利用 (実際の値はそれ以上になりうるので調整)
+                    const d = Math.min(1, density / 2); 
+                    let r, g, b;
+                    if (d < 0.25) {
+                        r = baseR + (0 - baseR) * (d / 0.25);
+                        g = baseG + (255 - baseG) * (d / 0.25);
+                        b = baseB + (255 - baseB) * (d / 0.25);
+                    } else if (d < 0.5) {
+                        r = 0;
+                        g = 255;
+                        b = 255 - 255 * ((d - 0.25) / 0.25);
+                    } else if (d < 0.75) {
+                        r = 255 * ((d - 0.5) / 0.25);
+                        g = 255;
+                        b = 0;
+                    } else {
+                        r = 255;
+                        g = 255 - 255 * ((d - 0.75) / 0.25);
+                        b = 0;
+                    }
+                    ctx.fillStyle = `rgb(${Math.floor(r)}, ${Math.floor(g)}, ${Math.floor(b)})`;
+                } else {
+                    ctx.fillStyle = `rgb(${baseR}, ${baseG}, ${baseB})`;
+                }
+                ctx.fillRect(offsetX + x*TILE_SIZE, offsetY + y*TILE_SIZE, TILE_SIZE, TILE_SIZE);
+
+            } else if (mapMode === 'political' && owner !== -1 && !isDrawing) {
                 // 政治モード: 地形を隠し、国の色のみを表示
                 const nat = nations.find(n => n.id === owner);
                 if (nat) {
@@ -3124,6 +3258,7 @@ function simulateDomesticPolitics(n) {
 }
 
 function simulateTick() {
+    updateMilitaryGrid();
     if (mapDirty) {
         updateContinents();
         mapDirty = false;
