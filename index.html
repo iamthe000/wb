@@ -142,7 +142,10 @@
         </div>
 
         <div id="nation-panel" class="panel" style="display:none;">
-            <h2 id="n-name">国家名</h2>
+            <h2 style="display: flex; align-items: center; justify-content: space-between;">
+                <span id="n-name">国家名</span>
+                <button id="btn-edit-nation" style="font-size: 0.65em; width: auto; padding: 2px 10px; margin: 0; background: #444;">編集</button>
+            </h2>
             <div class="stat-row"><span>指導者:</span> <span id="n-leader"></span></div>
             <div class="stat-row"><span>経済思想:</span> <span id="n-eco"></span></div>
             <div class="stat-row"><span>政治体制(大枠):</span> <span id="n-sys-broad"></span></div>
@@ -183,6 +186,42 @@
     </div>
 </div>
 
+
+<div id="edit-nation-modal" style="display:none; position:fixed; top:50%; left:50%; transform:translate(-50%, -50%); background:#222; border:1px solid #444; padding:20px; z-index:1000; width:90%; max-width:400px; max-height:80vh; overflow-y:auto; box-shadow: 0 0 20px rgba(0,0,0,0.8);">
+    <h2 style="margin-top:0; border-bottom:1px solid #555; padding-bottom:5px;">国家編集</h2>
+    <div class="edit-form-group">
+        <label>基本名 (Base Name)</label>
+        <input type="text" id="edit-n-basename">
+    </div>
+    <div class="edit-form-group">
+        <label>政治体制(大枠)</label>
+        <select id="edit-n-sys-broad"></select>
+    </div>
+    <div class="edit-form-group">
+        <label>政治体制(詳細)</label>
+        <select id="edit-n-sys-detailed"></select>
+    </div>
+    <div class="edit-form-group">
+        <label>国家体制</label>
+        <select id="edit-n-struct"></select>
+    </div>
+    <div class="edit-form-group">
+        <label>主権者</label>
+        <select id="edit-n-sov"></select>
+    </div>
+    <div class="edit-form-group">
+        <label>経済思想</label>
+        <select id="edit-n-eco"></select>
+    </div>
+    <div id="edit-n-preview-container">
+        <span id="edit-n-preview-label">プレビュー:</span>
+        <span id="edit-n-preview"></span>
+    </div>
+    <div style="display:flex; gap:10px;">
+        <button id="btn-edit-save" style="background:#27ae60; flex:1;">保存</button>
+        <button id="btn-edit-cancel" style="background:#c0392b; flex:1;">キャンセル</button>
+    </div>
+</div>
 
 <script src="src/script.js"></script>
 </body>
