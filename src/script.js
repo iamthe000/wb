@@ -969,6 +969,9 @@ class Nation {
         this.relations = {}; // { nationId: value (-100 to 100) }
         this.atWarWith = []; // list of nation IDs
         this.centroid = {x: 0, y: 0};
+        this.visualCentroid = {x: 0, y: 0};
+        this.visualAngle = 0;
+        this.largestComponentSize = 0;
         this.isDead = false;
         this.isRebel = false;
         this.parentName = "";
@@ -1251,15 +1254,93 @@ class Nation {
     }
 
     updateCentroid() {
-        if (this.tiles.length > 0) {
-            let sumX = 0, sumY = 0;
-            for (let i = 0; i < this.tiles.length; i++) {
-                const tileIdx = this.tiles[i];
-                sumX += tileIdx % width;
-                sumY += Math.floor(tileIdx / width);
+        if (this.tiles.length === 0) {
+            this.centroid = {x: 0, y: 0};
+            this.visualCentroid = {x: 0, y: 0};
+            this.visualAngle = 0;
+            this.largestComponentSize = 0;
+            return;
+        }
+
+        // Standard centroid (average of all tiles)
+        let sumX = 0, sumY = 0;
+        for (let i = 0; i < this.tiles.length; i++) {
+            const tileIdx = this.tiles[i];
+            sumX += tileIdx % width;
+            sumY += Math.floor(tileIdx / width);
+        }
+        this.centroid.x = sumX / this.tiles.length;
+        this.centroid.y = sumY / this.tiles.length;
+
+        // Find connected components to find the largest landmass
+        const tileSet = new Set(this.tiles);
+        const visited = new Set();
+        let largestComponent = [];
+
+        for (const startIdx of this.tiles) {
+            if (visited.has(startIdx)) continue;
+
+            const component = [];
+            const stack = [startIdx];
+            visited.add(startIdx);
+
+            while (stack.length > 0) {
+                const currIdx = stack.pop();
+                component.push(currIdx);
+
+                const cx = currIdx % width;
+                const cy = Math.floor(currIdx / width);
+
+                [[0, 1], [0, -1], [1, 0], [-1, 0]].forEach(([dx, dy]) => {
+                    const nx = cx + dx;
+                    const ny = cy + dy;
+                    if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
+                        const nIdx = ny * width + nx;
+                        if (tileSet.has(nIdx) && !visited.has(nIdx)) {
+                            visited.add(nIdx);
+                            stack.push(nIdx);
+                        }
+                    }
+                });
             }
-            this.centroid.x = sumX / this.tiles.length;
-            this.centroid.y = sumY / this.tiles.length;
+
+            if (component.length > largestComponent.length) {
+                largestComponent = component;
+            }
+        }
+
+        this.largestComponentSize = largestComponent.length;
+
+        if (largestComponent.length > 0) {
+            // Visual Centroid
+            let vSumX = 0, vSumY = 0;
+            for (const idx of largestComponent) {
+                vSumX += idx % width;
+                vSumY += Math.floor(idx / width);
+            }
+            this.visualCentroid.x = vSumX / largestComponent.length;
+            this.visualCentroid.y = vSumY / largestComponent.length;
+
+            // Visual Angle using PCA
+            let varX = 0, varY = 0, covXY = 0;
+            for (const idx of largestComponent) {
+                const x = idx % width;
+                const y = Math.floor(idx / width);
+                const dx = x - this.visualCentroid.x;
+                const dy = y - this.visualCentroid.y;
+                varX += dx * dx;
+                varY += dy * dy;
+                covXY += dx * dy;
+            }
+            
+            let angle = 0.5 * Math.atan2(2 * covXY, varX - varY);
+            
+            // Clamp to +/- 70 degrees (approximately 1.22 radians)
+            const maxRad = 70 * Math.PI / 180;
+            this.visualAngle = Math.max(-maxRad, Math.min(maxRad, angle));
+        } else {
+            this.visualCentroid = { ...this.centroid };
+            this.visualAngle = 0;
         }
     }
 
@@ -1850,25 +1931,31 @@ function renderMap() {
             // 傀儡国の名前は非表示
             if (n.isPuppet) return;
             
-            if (!n.isDead && n.tiles.length > 30) {
+            if (!n.isDead && n.largestComponentSize > 30) {
                 // mapScaleが小さい（ズームアウトしている）ほど、フォントサイズを大きくして視認性を維持
                 const baseSize = 10 / mapScale;
-                const sizeBonus = Math.min(12 / mapScale, (n.tiles.length / 600) / mapScale);
+                const sizeBonus = Math.min(12 / mapScale, (n.largestComponentSize / 600) / mapScale);
                 const fontSize = baseSize + sizeBonus;
                 
                 ctx.font = `bold ${fontSize}px "Yu Gothic", "SimHei", "Segoe UI", sans-serif`;
 
-                const drawX = offsetX + n.centroid.x * TILE_SIZE;
-                const drawY = offsetY + n.centroid.y * TILE_SIZE;
+                const drawX = offsetX + n.visualCentroid.x * TILE_SIZE;
+                const drawY = offsetY + n.visualCentroid.y * TILE_SIZE;
                 
+                ctx.save();
+                ctx.translate(drawX, drawY);
+                ctx.rotate(n.visualAngle);
+
                 // 文字の縁取り (厚め)
                 ctx.strokeStyle = "rgba(0,0,0,0.8)";
                 ctx.lineWidth = Math.max(3 / mapScale, 2);
-                ctx.strokeText(n.name, drawX, drawY);
+                ctx.strokeText(n.name, 0, 0);
                 
                 // 文字本体
                 ctx.fillStyle = n.color;
-                ctx.fillText(n.name, drawX, drawY);
+                ctx.fillText(n.name, 0, 0);
+
+                ctx.restore();
             }
         });
 
@@ -4487,6 +4574,7 @@ function loadGame(file) {
                 Object.setPrototypeOf(n, Nation.prototype);
                 n.cities.forEach(c => Object.setPrototypeOf(c, City.prototype));
             });
+            nations.forEach(n => n.updateCentroid());
             
             updateContinents();
             
