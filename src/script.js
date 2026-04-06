@@ -499,6 +499,10 @@ function setupInput() {
         openRankingModal();
     });
 
+    document.getElementById('btn-alliances').addEventListener('click', () => {
+        openAlliancesModal();
+    });
+
     // Save/Load
     document.getElementById('btn-save').addEventListener('click', saveGame);
     
@@ -658,6 +662,78 @@ function openRelationsModal() {
 function openRankingModal() {
     document.getElementById('ranking-modal').style.display = 'block';
     renderRankingContent();
+}
+
+function openAlliancesModal() {
+    document.getElementById('alliances-modal').style.display = 'block';
+    renderAlliancesContent();
+}
+
+function renderAlliancesContent() {
+    const content = document.getElementById('alliances-content');
+    content.innerHTML = '';
+
+    if (alliances.length === 0 && organizations.length === 0) {
+        content.innerHTML = '<div style="color:#aaa; text-align:center; padding:20px;">現在、有効な同盟や国際機関はありません。</div>';
+        return;
+    }
+
+    if (alliances.length > 0) {
+        const allianceSection = document.createElement('div');
+        allianceSection.innerHTML = '<h3 class="ranking-section-title">軍事同盟ブロック</h3>';
+        alliances.forEach(a => {
+            const stats = a.getStats();
+            const div = document.createElement('div');
+            div.className = 'panel';
+            div.style.marginBottom = '10px';
+            
+            let memberNames = a.members.map(mId => {
+                const n = nations.find(nat => nat.id === mId);
+                return n ? `<span style="color:${n.color}">${n.name}</span>` : "不明";
+            }).join(', ');
+
+            div.innerHTML = `
+                <div style="font-weight:bold; color:${a.color}; font-size:1.1em; border-bottom:1px solid #444; margin-bottom:5px; padding-bottom:3px;">${a.name}</div>
+                <div style="font-size:0.9em; margin-bottom:5px;"><b>加盟国:</b> ${memberNames}</div>
+                <div style="font-size:0.8em; color:#ccc;">
+                    総GDP: ${formatNum(stats.gdp)} | 総人口: ${formatNum(stats.pop)} | 推定総軍事力: ${formatNum(stats.military)}
+                </div>
+                <div style="margin-top:10px;">
+                    <div style="font-size:0.8em; color:#aaa; margin-bottom:3px;">最近の動向:</div>
+                    <div style="max-height:80px; overflow-y:auto; font-size:0.75em; background:rgba(0,0,0,0.3); padding:5px;">
+                        ${a.history.slice(-5).reverse().map(h => `[Y${h.year}] ${h.event}`).join('<br>')}
+                    </div>
+                </div>
+            `;
+            allianceSection.appendChild(div);
+        });
+        content.appendChild(allianceSection);
+    }
+
+    if (organizations.length > 0) {
+        const orgSection = document.createElement('div');
+        orgSection.innerHTML = '<h3 class="ranking-section-title">国際機関</h3>';
+        organizations.forEach(o => {
+            const div = document.createElement('div');
+            div.className = 'panel';
+            div.style.marginBottom = '10px';
+
+            let memberNames = o.members.map(mId => {
+                const n = nations.find(nat => nat.id === mId);
+                return n ? `<span style="color:${n.color}">${n.name}</span>` : "不明";
+            }).join(', ');
+
+            div.innerHTML = `
+                <div style="font-weight:bold; color:#4db8ff; font-size:1.1em; border-bottom:1px solid #444; margin-bottom:5px; padding-bottom:3px;">${o.name}</div>
+                <div style="font-size:0.9em; margin-bottom:5px;"><b>加盟国 (${o.members.length}カ国):</b> ${memberNames}</div>
+                <div style="font-size:0.8em; color:#ccc;">
+                    目的: ${o.name === "世界貿易機構" ? "経済協力・関税撤廃" : "科学技術の共有と発展"}
+                </div>
+            `;
+            orgSection.appendChild(div);
+        });
+        content.appendChild(orgSection);
+    }
 }
 
 function renderRankingContent() {
@@ -1179,6 +1255,27 @@ class Alliance {
         this.leaderId = leaderId;
         this.members = [leaderId];
         this.color = color || `hsl(${Math.random()*360}, 80%, 60%)`;
+        this.history = [];
+        this.addHistory(`同盟「${name}」が結成されました。`);
+    }
+
+    addHistory(event) {
+        this.history.push({ year: year, event: event });
+    }
+
+    getStats() {
+        let totalGdp = 0;
+        let totalPop = 0;
+        let totalMil = 0;
+        this.members.forEach(mId => {
+            const m = nations.find(n => n.id === mId);
+            if (m && !m.isDead) {
+                totalGdp += m.gdp;
+                totalPop += m.pop;
+                totalMil += m.getMilitaryPower();
+            }
+        });
+        return { gdp: totalGdp, pop: totalPop, military: totalMil };
     }
 }
 
@@ -4094,7 +4191,8 @@ function formAlliance(n1, n2) {
 
     if (n1.allianceId === -1 && n2.allianceId === -1) {
         // Create new alliance block
-        const allianceName = n1.baseName + "・" + n2.baseName + "同盟";
+        const suffix = (n1.cultureType === 'KANJI' || n2.cultureType === 'KANJI') ? "条約機構" : " Pact";
+        const allianceName = n1.baseName + "・" + n2.baseName + suffix;
         const newAlliance = new Alliance(allianceIdCounter++, allianceName, n1.id);
         newAlliance.members.push(n2.id);
         n1.allianceId = newAlliance.id;
@@ -4114,6 +4212,7 @@ function formAlliance(n1, n2) {
             });
             alliance.members.push(n2.id);
             n2.allianceId = alliance.id;
+            alliance.addHistory(`${n2.name}が同盟に加入しました。`);
             log(`同盟加入: ${n2.name}が「${alliance.name}」に加入しました。`, "log-peace");
         }
     } else if (n1.allianceId === -1 && n2.allianceId !== -1) {
@@ -4129,6 +4228,7 @@ function formAlliance(n1, n2) {
             });
             alliance.members.push(n1.id);
             n1.allianceId = alliance.id;
+            alliance.addHistory(`${n1.name}が同盟に加入しました。`);
             log(`同盟加入: ${n1.name}が「${alliance.name}」に加入しました。`, "log-peace");
         }
     } else {
@@ -4169,6 +4269,7 @@ function checkAllianceBlock(n) {
     if (!hasAlliesInBlock) {
         alliance.members = alliance.members.filter(mId => mId !== n.id);
         n.allianceId = -1;
+        alliance.addHistory(`${n.name}が同盟を離脱しました。`);
         log(`同盟離脱: ${n.name}が同盟ブロック「${alliance.name}」を離脱しました。`, "log-info");
         
         if (alliance.members.length <= 1) {
