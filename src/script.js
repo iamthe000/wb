@@ -172,6 +172,11 @@ let hegemonId = -1;
 let hegemonStatus = "";
 let highTensionDuration = 0;
 
+let alliances = [];
+let allianceIdCounter = 0;
+let organizations = [];
+let orgIdCounter = 0;
+
 // マウス操作用
 let mousePressed = false;
 let mouseButton = 0; // 0:Left, 2:Right
@@ -388,6 +393,9 @@ function setupInput() {
         } else if (mapMode === 'terrain') {
             mapMode = 'military';
             e.target.innerText = '地図モード: 軍事';
+        } else if (mapMode === 'military') {
+            mapMode = 'alliance';
+            e.target.innerText = '地図モード: 同盟';
         } else {
             mapMode = 'political';
             e.target.innerText = '地図モード: 政治';
@@ -1162,6 +1170,30 @@ function generateTerrainFeatures() {
 }
 
 /**
+ * 同盟クラス
+ */
+class Alliance {
+    constructor(id, name, leaderId, color) {
+        this.id = id;
+        this.name = name;
+        this.leaderId = leaderId;
+        this.members = [leaderId];
+        this.color = color || `hsl(${Math.random()*360}, 80%, 60%)`;
+    }
+}
+
+/**
+ * 国際機関クラス
+ */
+class InternationalOrganization {
+    constructor(id, name) {
+        this.id = id;
+        this.name = name;
+        this.members = []; // Array of nation IDs
+    }
+}
+
+/**
  * 都市クラス
  */
 class City {
@@ -1246,7 +1278,9 @@ class Nation {
         this.isPuppet = false;
         this.masterId = -1;
         this.puppetSince = 0;
-        this.allies = []; // List of allied nation IDs
+        this.allies = []; // List of allied nation IDs (legacy, kept for logic)
+        this.allianceId = -1;
+        this.organizationIds = [];
         
         this.cities = [];
         this.history = [];
@@ -2093,6 +2127,28 @@ function renderMap() {
                         }
                     }
 
+                    ctx.fillStyle = fillColor;
+                    ctx.fillRect(offsetX + x*TILE_SIZE, offsetY + y*TILE_SIZE, TILE_SIZE, TILE_SIZE);
+                }
+            } else if (mapMode === 'alliance' && owner !== -1 && !isDrawing) {
+                // 同盟モード: 同盟ブロックごとに色分け
+                const nat = nations.find(n => n.id === owner);
+                if (nat) {
+                    let fillColor = nat.color;
+                    if (nat.allianceId !== -1) {
+                        const alliance = alliances.find(a => a.id === nat.allianceId);
+                        if (alliance) fillColor = alliance.color;
+                    } else if (nat.isPuppet && nat.masterId !== -1) {
+                        const master = nations.find(m => m.id === nat.masterId);
+                        if (master) {
+                            if (master.allianceId !== -1) {
+                                const alliance = alliances.find(a => a.id === master.allianceId);
+                                if (alliance) fillColor = alliance.color;
+                            } else {
+                                fillColor = master.color;
+                            }
+                        }
+                    }
                     ctx.fillStyle = fillColor;
                     ctx.fillRect(offsetX + x*TILE_SIZE, offsetY + y*TILE_SIZE, TILE_SIZE, TILE_SIZE);
                 }
@@ -3591,6 +3647,9 @@ function simulateTick() {
         return; 
     }
 
+    // 国際機関の管理と効果
+    manageInternationalOrganizations();
+
     hegemonId = -1;
     let maxScore = -1;
     nations.forEach(n => {
@@ -4028,10 +4087,54 @@ function simulateTick() {
 
 function formAlliance(n1, n2) {
     if (n1.allies.includes(n2.id)) return;
+    
+    // Legacy allies list
     n1.allies.push(n2.id);
     n2.allies.push(n1.id);
+
+    if (n1.allianceId === -1 && n2.allianceId === -1) {
+        // Create new alliance block
+        const allianceName = n1.baseName + "・" + n2.baseName + "同盟";
+        const newAlliance = new Alliance(allianceIdCounter++, allianceName, n1.id);
+        newAlliance.members.push(n2.id);
+        n1.allianceId = newAlliance.id;
+        n2.allianceId = newAlliance.id;
+        alliances.push(newAlliance);
+        log(`同盟結成: 新たな軍事ブロック「${allianceName}」が結成されました。`, "log-peace");
+    } else if (n1.allianceId !== -1 && n2.allianceId === -1) {
+        // n2 joins n1's alliance block
+        const alliance = alliances.find(a => a.id === n1.allianceId);
+        if (alliance) {
+            alliance.members.forEach(mId => {
+                const member = nations.find(m => m.id === mId);
+                if (member && member.id !== n2.id) {
+                    if (!member.allies.includes(n2.id)) member.allies.push(n2.id);
+                    if (!n2.allies.includes(member.id)) n2.allies.push(member.id);
+                }
+            });
+            alliance.members.push(n2.id);
+            n2.allianceId = alliance.id;
+            log(`同盟加入: ${n2.name}が「${alliance.name}」に加入しました。`, "log-peace");
+        }
+    } else if (n1.allianceId === -1 && n2.allianceId !== -1) {
+        // n1 joins n2's alliance block
+        const alliance = alliances.find(a => a.id === n2.allianceId);
+        if (alliance) {
+            alliance.members.forEach(mId => {
+                const member = nations.find(m => m.id === mId);
+                if (member && member.id !== n1.id) {
+                    if (!member.allies.includes(n1.id)) member.allies.push(n1.id);
+                    if (!n1.allies.includes(member.id)) n1.allies.push(member.id);
+                }
+            });
+            alliance.members.push(n1.id);
+            n1.allianceId = alliance.id;
+            log(`同盟加入: ${n1.name}が「${alliance.name}」に加入しました。`, "log-peace");
+        }
+    } else {
+        log(`同盟締結: ${n1.name}と${n2.name}は軍事同盟を締結しました。`, "log-peace");
+    }
     
-    log(`同盟締結: ${n1.name}と${n2.name}は軍事同盟を締結しました。`, "log-peace");
     n1.addHistory(`同盟: ${n2.name}と締結`);
     n2.addHistory(`同盟: ${n1.name}と締結`);
 }
@@ -4041,9 +4144,91 @@ function breakAlliance(n1, n2) {
     n1.allies = n1.allies.filter(id => id !== n2.id);
     n2.allies = n2.allies.filter(id => id !== n1.id);
     
+    // Handle Alliance block
+    if (n1.allianceId !== -1 && n1.allianceId === n2.allianceId) {
+        checkAllianceBlock(n1);
+        checkAllianceBlock(n2);
+    }
+
     log(`同盟破棄: ${n1.name}と${n2.name}の同盟関係は解消されました。`, "log-war");
     n1.addHistory(`同盟破棄: ${n2.name}との関係解消`);
     n2.addHistory(`同盟破棄: ${n1.name}との関係解消`);
+}
+
+function checkAllianceBlock(n) {
+    if (n.allianceId === -1) return;
+    const alliance = alliances.find(a => a.id === n.allianceId);
+    if (!alliance) {
+        n.allianceId = -1;
+        return;
+    }
+    
+    // Check if n has any other allies in the same alliance block
+    const hasAlliesInBlock = alliance.members.some(mId => mId !== n.id && n.allies.includes(mId));
+    
+    if (!hasAlliesInBlock) {
+        alliance.members = alliance.members.filter(mId => mId !== n.id);
+        n.allianceId = -1;
+        log(`同盟離脱: ${n.name}が同盟ブロック「${alliance.name}」を離脱しました。`, "log-info");
+        
+        if (alliance.members.length <= 1) {
+            if (alliance.members.length === 1) {
+                const lastMember = nations.find(m => m.id === alliance.members[0]);
+                if (lastMember) lastMember.allianceId = -1;
+            }
+            alliances = alliances.filter(a => a.id !== alliance.id);
+            log(`同盟解散: 同盟ブロック「${alliance.name}」は解散しました。`, "log-info");
+        }
+    }
+}
+
+function manageInternationalOrganizations() {
+    // 1. Create organizations if they don't exist
+    if (organizations.length === 0 && year > 10) {
+        const ecoOrg = new InternationalOrganization(orgIdCounter++, "世界貿易機構");
+        organizations.push(ecoOrg);
+        const sciOrg = new InternationalOrganization(orgIdCounter++, "国際科学評議会");
+        organizations.push(sciOrg);
+        log("国際社会の進展: 「世界貿易機構」および「国際科学評議会」が設立されました。", "log-peace");
+    }
+
+    // 2. Membership management and effects
+    organizations.forEach(org => {
+        nations.forEach(n => {
+            if (n.isDead) return;
+
+            const isMember = n.organizationIds.includes(org.id);
+
+            if (!isMember) {
+                // Join condition
+                let joinChance = 0.001;
+                if (org.name === "世界貿易機構" && n.gdp > 500) joinChance = 0.01;
+                if (org.name === "国際科学評議会" && n.tech >= 2) joinChance = 0.01;
+
+                if (Math.random() < joinChance) {
+                    n.organizationIds.push(org.id);
+                    org.members.push(n.id);
+                    log(`${n.name}が国際機関「${org.name}」に加盟しました。`, "log-peace");
+                }
+            } else {
+                // Member effects
+                if (org.name === "世界貿易機構") {
+                    n.gdp *= 1.001; // 0.1% GDP boost
+                } else if (org.name === "国際科学評議会") {
+                    if (Math.random() < 0.005) {
+                        n.industry += 1;
+                    }
+                }
+
+                // Leave condition (High tension or low stability)
+                if (worldTension > 80 && Math.random() < 0.005) {
+                    n.organizationIds = n.organizationIds.filter(id => id !== org.id);
+                    org.members = org.members.filter(id => id !== n.id);
+                    log(`${n.name}が国際機関「${org.name}」から脱退しました。`, "log-war");
+                }
+            }
+        });
+    });
 }
 
 function isNeighbor(n1, n2) {
@@ -4140,7 +4325,12 @@ function declareWar(n1, n2) {
         if (ally && !ally.isDead && !ally.atWarWith.includes(n1.id) && ally.id !== n1.id) {
             // 確率で参戦 (高い確率)
             if (Math.random() < 0.9) {
-                log(`同盟義務: ${ally.name}は${n2.name}との同盟に基づき、${n1.name}に宣戦布告しました！`, "log-war");
+                let reason = `${n2.name}との同盟に基づき`;
+                if (n2.allianceId !== -1 && n2.allianceId === ally.allianceId) {
+                    const alliance = alliances.find(a => a.id === n2.allianceId);
+                    if (alliance) reason = `同盟ブロック「${alliance.name}」の義務として`;
+                }
+                log(`同盟義務: ${ally.name}は${reason}、${n1.name}に宣戦布告しました！`, "log-war");
                 declareWar(ally, n1);
             } else {
                 log(`同盟不履行: ${ally.name}は${n2.name}への援軍を拒否しました...(関係悪化)`, "log-info");
@@ -4570,6 +4760,21 @@ function updateNationPanel() {
     document.getElementById('n-religion').innerText = n.religion;
     document.getElementById('n-culture').innerText = (n.cultureType === 'KANJI' ? '漢字文化圏' : 'アルファベット文化圏');
     document.getElementById('n-tech').innerText = TECH_LEVELS[n.tech];
+
+    let allianceText = "なし";
+    if (n.allianceId !== -1) {
+        const alliance = alliances.find(a => a.id === n.allianceId);
+        if (alliance) allianceText = alliance.name;
+    }
+    document.getElementById('n-alliance').innerText = allianceText;
+
+    let orgsText = "なし";
+    if (n.organizationIds.length > 0) {
+        const myOrgs = organizations.filter(o => n.organizationIds.includes(o.id));
+        orgsText = myOrgs.map(o => o.name).join(", ");
+    }
+    document.getElementById('n-orgs').innerText = orgsText;
+
     document.getElementById('n-stability').innerText = Math.floor(n.stability) + "%";
     document.getElementById('n-governance').innerText = Math.floor(n.governance);
     
@@ -4787,6 +4992,8 @@ function saveGame() {
         currentScenario, activeScenario,
         grid, elevationGrid, ownerGrid,
         nations, nationIdCounter,
+        alliances, allianceIdCounter,
+        organizations, orgIdCounter,
         year, worldTension,
         hegemonId, hegemonStatus, highTensionDuration,
         frameCounter, simSpeed
@@ -4819,6 +5026,10 @@ function loadGame(file) {
             ownerGrid = data.ownerGrid;
             nations = data.nations;
             nationIdCounter = data.nationIdCounter;
+            alliances = data.alliances || [];
+            allianceIdCounter = data.allianceIdCounter || 0;
+            organizations = data.organizations || [];
+            orgIdCounter = data.orgIdCounter || 0;
             year = data.year;
             worldTension = data.worldTension;
             hegemonId = data.hegemonId;
@@ -4832,6 +5043,8 @@ function loadGame(file) {
                 Object.setPrototypeOf(n, Nation.prototype);
                 n.cities.forEach(c => Object.setPrototypeOf(c, City.prototype));
             });
+            alliances.forEach(a => Object.setPrototypeOf(a, Alliance.prototype));
+            organizations.forEach(o => Object.setPrototypeOf(o, InternationalOrganization.prototype));
             nations.forEach(n => n.updateCentroid());
             
             updateContinents();
