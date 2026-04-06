@@ -30,6 +30,12 @@
     <button onclick="document.getElementById('ranking-modal').style.display='none'" style="margin-top:15px; width:100%;">閉じる</button>
 </div>
 
+<div id="alliances-modal" style="display:none; position:fixed; top:50%; left:50%; transform:translate(-50%, -50%); background:#222; border:1px solid #444; padding:20px; z-index:1000; width:90%; max-width:800px; max-height:80vh; overflow-y:auto; box-shadow: 0 0 20px rgba(0,0,0,0.8);">
+    <h2 style="margin-top:0; border-bottom:1px solid #555; padding-bottom:5px;">同盟・国際機関</h2>
+    <div id="alliances-content"></div>
+    <button onclick="document.getElementById('alliances-modal').style.display='none'" style="margin-top:15px; width:100%;">閉じる</button>
+</div>
+
 <div id="rulebook-modal" style="display:none; position:fixed; top:50%; left:50%; transform:translate(-50%, -50%); background:#222; border:1px solid #444; padding:20px; z-index:1000; width:90%; max-width:600px; max-height:80vh; overflow-y:auto; box-shadow: 0 0 20px rgba(0,0,0,0.8); font-size: 0.9em; line-height: 1.6; box-sizing: border-box;">
     <h2 style="margin-top:0; border-bottom:1px solid #555; padding-bottom:5px;">ルールブック & システム詳細</h2>
     
@@ -135,6 +141,7 @@
             <div class="stat-row"><span>緊張度:</span> <span id="info-tension">0%</span></div>
             <div class="stat-row"><span>覇権国:</span> <span id="info-hegemon" style="font-weight:bold;">なし</span></div>
             <button id="btn-ranking" style="margin-bottom:10px; background:#6c5ce7; border-color:#8e44ad;">📊 国力ランキング</button>
+            <button id="btn-alliances" style="margin-bottom:10px; background:#2980b9;">🌐 同盟・国際機関</button>
             <button id="btn-map-mode" style="margin-bottom:10px;">地図モード: 政治</button>
             <button id="btn-terrain-edit" style="margin-bottom:10px; background:#d35400;">🛠 地形編集: オフ</button>
             <div id="sim-edit-tools" style="display:none; margin-bottom:10px; padding:10px; background:rgba(0,0,0,0.2); border-radius:4px;">
