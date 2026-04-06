@@ -183,6 +183,7 @@ let isDemocracyAwakened = false;
 let isSocialismSprouted = false;
 let internationalAllianceId = -1;
 let internationalVersion = 1;
+let alliedNationsId = -1;
 
 let alliances = [];
 let allianceIdCounter = 0;
@@ -3974,6 +3975,9 @@ function simulateTick() {
     // インターナショナルの管理
     manageTheInternational();
 
+    // 連合国（非社会主義・民主主義国家同盟）の管理
+    manageAlliedNations();
+
     hegemonId = -1;
     let maxScore = -1;
     nations.forEach(n => {
@@ -5045,6 +5049,95 @@ function manageTheInternational() {
     }
 }
 
+function manageAlliedNations() {
+    // インターナショナルが存在し、かつ一定以上の勢力（世界のタイルの20%以上）を持っている場合に結成を検討
+    const international = alliances.find(a => a.id === internationalAllianceId);
+    if (!international) {
+        // インターナショナルがいなければ連合国も解散（目的を失う）
+        if (alliedNationsId !== -1) {
+            const oldA = alliances.find(a => a.id === alliedNationsId);
+            if (oldA) {
+                oldA.members.forEach(mId => {
+                    const m = nations.find(nat => nat.id === mId);
+                    if (m) {
+                        m.allianceId = -1;
+                        m.allies = [];
+                    }
+                });
+                alliances = alliances.filter(a => a.id !== alliedNationsId);
+            }
+            alliedNationsId = -1;
+        }
+        return;
+    }
+
+    const totalLandTiles = grid.filter(t => t !== 0).length;
+    let internationalTiles = 0;
+    international.members.forEach(mId => {
+        const m = nations.find(nat => nat.id === mId);
+        if (m) internationalTiles += m.tiles.length;
+    });
+
+    const internationalRatio = internationalTiles / totalLandTiles;
+
+    // 非社会主義かつ民主主義の国家を特定
+    const democraticNations = nations.filter(n => 
+        !n.isDead && !n.isSocialist() && n.sysBroad === '民主主義'
+    );
+
+    if (internationalRatio > 0.2 && democraticNations.length >= 2) {
+        let alliedNations = alliances.find(a => a.id === alliedNationsId);
+        if (!alliedNations) {
+            const leader = democraticNations.sort((a,b) => b.gdp - a.gdp)[0];
+            alliedNations = new Alliance(allianceIdCounter++, "連合国", leader.id, "#0000bb"); // Blue color
+            alliances.push(alliedNations);
+            alliedNationsId = alliedNations.id;
+            log(`自由主義の危機！ インターナショナルの拡大に対抗するため、民主主義諸国による同盟「連合国」が結成されました。`, "log-war");
+        }
+
+        // 加入
+        democraticNations.forEach(n => {
+            if (n.allianceId !== alliedNations.id) {
+                // インターナショナルへの対抗を優先し、既存の同盟から脱退
+                if (n.allianceId !== -1) {
+                    const oldA = alliances.find(a => a.id === n.allianceId);
+                    if (oldA) {
+                        oldA.members = oldA.members.filter(mId => mId !== n.id);
+                        if (oldA.members.length <= 1) alliances = alliances.filter(a => a.id !== oldA.id);
+                    }
+                }
+                n.allianceId = alliedNations.id;
+                if (!alliedNations.members.includes(n.id)) alliedNations.members.push(n.id);
+                
+                // 相互同盟リスト更新
+                alliedNations.members.forEach(mId => {
+                    const m = nations.find(nat => nat.id === mId);
+                    if (m && m.id !== n.id) {
+                        if (!m.allies.includes(n.id)) m.allies.push(n.id);
+                        if (!n.allies.includes(m.id)) n.allies.push(m.id);
+                    }
+                });
+                log(`${n.name}が連合国に加入しました。`, "log-peace");
+            }
+        });
+    } else if (alliedNationsId !== -1) {
+        // インターナショナルの脅威が去った、または民主主義国が減った場合は解散
+        const oldA = alliances.find(a => a.id === alliedNationsId);
+        if (oldA) {
+            oldA.members.forEach(mId => {
+                const m = nations.find(nat => nat.id === mId);
+                if (m) {
+                    m.allianceId = -1;
+                    m.allies = [];
+                }
+            });
+            alliances = alliances.filter(a => a.id !== alliedNationsId);
+            log(`脅威が去り、連合国は解散しました。`, "log-info");
+        }
+        alliedNationsId = -1;
+    }
+}
+
 function battle(attacker, defender) {
     // 攻撃側のパワー vs 防御側のパワー + 地形ボーナス
     const atkPow = attacker.getMilitaryPower() * (0.8 + Math.random()*0.4);
@@ -5460,6 +5553,7 @@ function saveGame() {
         hegemonId, hegemonStatus, highTensionDuration,
         isDemocracyAwakened, isSocialismSprouted,
         internationalAllianceId, internationalVersion,
+        alliedNationsId,
         frameCounter, simSpeed
     };
     
@@ -5503,6 +5597,7 @@ function loadGame(file) {
             isSocialismSprouted = data.isSocialismSprouted || false;
             internationalAllianceId = data.internationalAllianceId !== undefined ? data.internationalAllianceId : -1;
             internationalVersion = data.internationalVersion || 1;
+            alliedNationsId = data.alliedNationsId !== undefined ? data.alliedNationsId : -1;
             frameCounter = data.frameCounter;
             simSpeed = data.simSpeed;
             
