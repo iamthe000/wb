@@ -102,6 +102,9 @@ function generatePoliticalSystem(currentTech) {
     if (!isDemocracyAwakened && broad === '権威主義') {
         details = details.filter(d => d !== '立憲君主制');
     }
+    if (!isSocialismSprouted && broad === '全体主義') {
+        details = details.filter(d => d !== '前衛党独裁');
+    }
     const detailed = details[Math.floor(Math.random() * details.length)];
     
     // 3. Sovereign
@@ -127,7 +130,7 @@ function generatePoliticalSystem(currentTech) {
     } else {
         // Filter based on politics
         if (broad === '全体主義' || detailed.includes('計画') || detailed.includes('社会主義')) {
-             possibleEcos = ['計画経済', '統制経済'];
+             possibleEcos = isSocialismSprouted ? ['計画経済', '統制経済'] : ['統制経済'];
         } else if (broad === '民主主義') {
              possibleEcos = ['自由放任主義', '社会的市場経済', '混合経済', '協同組合主義'];
         } else if (detailed.includes('絶対君主')) {
@@ -177,6 +180,9 @@ let hegemonId = -1;
 let hegemonStatus = "";
 let highTensionDuration = 0;
 let isDemocracyAwakened = false;
+let isSocialismSprouted = false;
+let internationalAllianceId = -1;
+let internationalVersion = 1;
 
 let alliances = [];
 let allianceIdCounter = 0;
@@ -1091,6 +1097,7 @@ function generateWorld() {
 
     activeScenario = currentScenario;
     isDemocracyAwakened = (activeScenario === 'TOTALLER_KRIEG' || activeScenario === 'GRACEFUL_US');
+    isSocialismSprouted = (activeScenario === 'TOTALLER_KRIEG' || activeScenario === 'GRACEFUL_US');
 
     // 1. 地形補正 (山と川)
     generateTerrainFeatures();
@@ -2716,6 +2723,24 @@ function handlePolitics(n) {
         n.addHistory(`民主化: ${oldName} -> ${n.name}`);
     }
 
+    // 社会主義への移行
+    if (isSocialismSprouted && n.sysDetailed !== '前衛党独裁' && n.tech >= 2 && n.stability < 40 && Math.random() < 0.001) {
+        // 徹底抗戦モードの枢軸国・連合国は革命不可
+        if (activeScenario === 'TOTALLER_KRIEG' && (n.name === '枢軸国' || n.name === '連合国')) return;
+
+        const oldName = n.name;
+        n.sysBroad = '全体主義';
+        n.sysDetailed = '前衛党独裁';
+        n.sovereign = '党';
+        n.ecoIdeology = '計画経済';
+        n.govType = n.sysDetailed;
+
+        n.stability = Math.min(100, n.stability + 30);
+        n.updateName();
+        log(`${oldName}で社会主義革命が発生し、${n.name}となりました。`, "log-war");
+        n.addHistory(`社会主義革命: ${oldName} -> ${n.name}`);
+    }
+
     // 平和的独立 (低確率)
     if (n.stability < 60 && n.cities.length > 2) {
         // 首都以外で不満が高い都市が対象
@@ -3032,16 +3057,19 @@ function triggerCityRebellion(n, cities) {
 
     // かっこいい反乱軍の名称生成
     let rebelTypes = [
-        { name: "臨時政府", gov: "臨時政府", demo: true },
-        { name: "立憲派", gov: "革命政府", demo: true },
-        { name: "正統政府", gov: "正統政府", demo: false },
-        { name: "救国戦線", gov: "軍事評議会制", demo: false },
-        { name: "人民委員会", gov: "革命政府", demo: true },
-        { name: "暫定政府", gov: "暫定政府", demo: true },
-        { name: "暫定統治機構", gov: "暫定統治機構", demo: false }
+        { name: "臨時政府", gov: "臨時政府", type: "DEMO" },
+        { name: "立憲派", gov: "革命政府", type: "DEMO" },
+        { name: "正統政府", gov: "正統政府", type: "OTHER" },
+        { name: "救国戦線", gov: "軍事評議会制", type: "OTHER" },
+        { name: "人民委員会", gov: "革命政府", type: "SOC" },
+        { name: "暫定政府", gov: "暫定政府", type: "DEMO" },
+        { name: "暫定統治機構", gov: "暫定統治機構", type: "OTHER" }
     ];
     if (!isDemocracyAwakened) {
-        rebelTypes = rebelTypes.filter(t => !t.demo);
+        rebelTypes = rebelTypes.filter(t => t.type !== "DEMO");
+    }
+    if (!isSocialismSprouted) {
+        rebelTypes = rebelTypes.filter(t => t.type !== "SOC");
     }
     
     // 特別な名称: 共和国第n政 (親が民主制の場合)
@@ -3057,7 +3085,12 @@ function triggerCityRebellion(n, cities) {
         const type = rebelTypes[Math.floor(Math.random() * rebelTypes.length)];
         rebel.sysDetailed = type.gov;
         // Adjust broad/sovereign for special types
-        if (type.gov === '革命政府' || type.gov === '臨時政府' || type.gov === '暫定政府') {
+        if (type.type === "SOC") {
+            rebel.sysBroad = '全体主義';
+            rebel.sysDetailed = '前衛党独裁';
+            rebel.sovereign = '党';
+            rebel.ecoIdeology = '計画経済';
+        } else if (type.gov === '革命政府' || type.gov === '臨時政府' || type.gov === '暫定政府') {
             rebel.sysBroad = '民主主義';
             rebel.sovereign = '国民';
             if (isDemocracyAwakened) rebel.generateParties();
@@ -3698,6 +3731,16 @@ function simulateTick() {
         }
     }
 
+    // 社会主義の芽生えイベントのチェック
+    if (!isSocialismSprouted) {
+        let maxTech = 0;
+        nations.forEach(n => { if (!n.isDead && n.tech > maxTech) maxTech = n.tech; });
+        if (maxTech >= 2 || year >= 1848) {
+            isSocialismSprouted = true;
+            log("歴史的転換点: 「社会主義の芽生え」！ 工業化の進展と共に労働者が団結し、社会主義・共産主義の思想が広まり始めました。", "log-peace");
+        }
+    }
+
     updateMilitaryGrid();
     if (mapDirty) {
         updateContinents();
@@ -3914,6 +3957,9 @@ function simulateTick() {
 
     // 国際機関の管理と効果
     manageInternationalOrganizations();
+
+    // インターナショナルの管理
+    manageTheInternational();
 
     hegemonId = -1;
     let maxScore = -1;
@@ -4921,6 +4967,71 @@ function makePeace(n1, n2) {
     concludePeace(n1, n2, 'DEFAULT');
 }
 
+function manageTheInternational() {
+    if (!isSocialismSprouted) return;
+
+    // 社会主義・共産主義国家を特定
+    const socialistNations = nations.filter(n => 
+        !n.isDead && 
+        (n.sysDetailed === '前衛党独裁' || (n.ecoIdeology && (n.ecoIdeology.includes('計画') || n.ecoIdeology.includes('統制')) && n.sysBroad === '全体主義'))
+    );
+
+    if (socialistNations.length < 2) {
+        // 1カ国以下ならインターナショナルは維持されない（既存があれば解散チェックはしないが）
+        return;
+    }
+
+    // インターナショナル同盟の存在チェック
+    let international = alliances.find(a => a.id === internationalAllianceId);
+
+    if (!international) {
+        // 新規作成
+        const leader = socialistNations.sort((a,b) => b.gdp - a.gdp)[0];
+        const name = (internationalVersion === 1) ? "インターナショナル" : `第${internationalVersion}インターナショナル`;
+        international = new Alliance(allianceIdCounter++, name, leader.id, "#cc0000"); // Red color
+        alliances.push(international);
+        internationalAllianceId = international.id;
+        leader.allianceId = international.id;
+        log(`万国の労働者よ、団結せよ！ 社会主義国家による同盟「${name}」が結成されました。`, "log-war");
+    }
+
+    // 加入漏れの社会主義国を招待
+    socialistNations.forEach(n => {
+        if (n.allianceId !== international.id) {
+            // 他の同盟に入っている場合は脱退してインターナショナル優先（思想的結束）
+            if (n.allianceId !== -1) {
+                const oldA = alliances.find(a => a.id === n.allianceId);
+                if (oldA) {
+                    oldA.members = oldA.members.filter(mId => mId !== n.id);
+                    if (oldA.members.length <= 1) alliances = alliances.filter(a => a.id !== oldA.id);
+                }
+            }
+            n.allianceId = international.id;
+            if (!international.members.includes(n.id)) international.members.push(n.id);
+            // 相互に同盟リストを更新
+            international.members.forEach(mId => {
+                const m = nations.find(nat => nat.id === mId);
+                if (m && m.id !== n.id) {
+                    if (!m.allies.includes(n.id)) m.allies.push(n.id);
+                    if (!n.allies.includes(m.id)) n.allies.push(m.id);
+                }
+            });
+            log(`${n.name}がインターナショナルに加入しました。`, "log-peace");
+        }
+    });
+
+    // 死んだ国の除外は Alliance クラスや既存ロジックで概ね処理されるが、
+    // インターナショナル自体が崩壊（全滅）した場合のケア
+    if (international.members.every(mId => {
+        const m = nations.find(nat => nat.id === mId);
+        return !m || m.isDead;
+    })) {
+        internationalAllianceId = -1;
+        internationalVersion++;
+        alliances = alliances.filter(a => a.id !== international.id);
+    }
+}
+
 function battle(attacker, defender) {
     // 攻撃側のパワー vs 防御側のパワー + 地形ボーナス
     const atkPow = attacker.getMilitaryPower() * (0.8 + Math.random()*0.4);
@@ -5334,7 +5445,8 @@ function saveGame() {
         organizations, orgIdCounter,
         year, worldTension,
         hegemonId, hegemonStatus, highTensionDuration,
-        isDemocracyAwakened,
+        isDemocracyAwakened, isSocialismSprouted,
+        internationalAllianceId, internationalVersion,
         frameCounter, simSpeed
     };
     
@@ -5375,6 +5487,9 @@ function loadGame(file) {
             hegemonStatus = data.hegemonStatus;
             highTensionDuration = data.highTensionDuration;
             isDemocracyAwakened = data.isDemocracyAwakened || false;
+            isSocialismSprouted = data.isSocialismSprouted || false;
+            internationalAllianceId = data.internationalAllianceId !== undefined ? data.internationalAllianceId : -1;
+            internationalVersion = data.internationalVersion || 1;
             frameCounter = data.frameCounter;
             simSpeed = data.simSpeed;
             
