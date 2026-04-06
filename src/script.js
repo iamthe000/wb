@@ -1256,11 +1256,78 @@ class Alliance {
         this.members = [leaderId];
         this.color = color || `hsl(${Math.random()*360}, 80%, 60%)`;
         this.history = [];
+        this.visualCentroid = {x: 0, y: 0};
+        this.visualAngle = 0;
+        this.largestComponentSize = 0;
         this.addHistory(`同盟「${name}」が結成されました。`);
     }
 
     addHistory(event) {
         this.history.push({ year: year, event: event });
+    }
+
+    updateCentroid() {
+        let allTiles = [];
+        this.members.forEach(mId => {
+            const n = nations.find(nat => nat.id === mId);
+            if (n && !n.isDead) {
+                allTiles = allTiles.concat(n.tiles);
+            }
+        });
+
+        if (allTiles.length === 0) {
+            this.visualCentroid = {x: 0, y: 0};
+            this.visualAngle = 0;
+            this.largestComponentSize = 0;
+            return;
+        }
+
+        // Find largest component among ALL tiles of the alliance
+        const tileSet = new Set(allTiles);
+        const visited = new Set();
+        let largestComponent = [];
+
+        for (const startIdx of allTiles) {
+            if (visited.has(startIdx)) continue;
+            const component = [];
+            const stack = [startIdx];
+            visited.add(startIdx);
+            while (stack.length > 0) {
+                const currIdx = stack.pop();
+                component.push(currIdx);
+                const cx = currIdx % width, cy = Math.floor(currIdx / width);
+                [[0, 1], [0, -1], [1, 0], [-1, 0]].forEach(([dx, dy]) => {
+                    const nx = cx + dx, ny = cy + dy;
+                    if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
+                        const nIdx = ny * width + nx;
+                        if (tileSet.has(nIdx) && !visited.has(nIdx)) {
+                            visited.add(nIdx);
+                            stack.push(nIdx);
+                        }
+                    }
+                });
+            }
+            if (component.length > largestComponent.length) largestComponent = component;
+        }
+
+        this.largestComponentSize = largestComponent.length;
+        if (largestComponent.length > 0) {
+            let vSumX = 0, vSumY = 0;
+            for (const idx of largestComponent) {
+                vSumX += idx % width; vSumY += Math.floor(idx / width);
+            }
+            this.visualCentroid.x = vSumX / largestComponent.length;
+            this.visualCentroid.y = vSumY / largestComponent.length;
+            let varX = 0, varY = 0, covXY = 0;
+            for (const idx of largestComponent) {
+                const x = idx % width, y = Math.floor(idx / width);
+                const dx = x - this.visualCentroid.x, dy = y - this.visualCentroid.y;
+                varX += dx * dx; varY += dy * dy; covXY += dx * dy;
+            }
+            let angle = 0.5 * Math.atan2(2 * covXY, varX - varY);
+            const maxRad = 70 * Math.PI / 180;
+            this.visualAngle = Math.max(-maxRad, Math.min(maxRad, angle));
+        }
     }
 
     getStats() {
@@ -2277,8 +2344,25 @@ function renderMap() {
     }
     
     // 国境線の描画 (HOI4スタイル)
-    if (!isDrawing && mapMode === 'political') {
+    if (!isDrawing && (mapMode === 'political' || mapMode === 'alliance')) {
         ctx.lineWidth = 2;
+        
+        // Build relation cache for performance
+        const relationCache = {};
+        nations.forEach(n => {
+            if (n.isDead) return;
+            relationCache[n.id] = { war: new Set(n.atWarWith), allies: new Set(n.allies) };
+        });
+
+        const getStrokeColor = (o1, o2) => {
+            if (o1 === -1 || o2 === -1 || o1 === o2 || o2 === -2) return "rgba(0,0,0,0.5)";
+            const r1 = relationCache[o1];
+            if (!r1) return "rgba(0,0,0,0.5)";
+            if (r1.war.has(o2)) return "#5e0b0b"; // 暗い赤 (War)
+            if (r1.allies.has(o2)) return "#064021"; // 暗い緑 (Allies)
+            return "rgba(0,0,0,0.5)";
+        };
+
         for (let y = 0; y < height; y++) {
             for (let x = 0; x < width; x++) {
                 const i = y * width + x;
@@ -2289,14 +2373,14 @@ function renderMap() {
                 const bottomOwner = (y < height - 1) ? ownerGrid[i + width] : -2;
 
                 if (owner !== rightOwner) {
-                    ctx.strokeStyle = "rgba(0,0,0,0.5)";
+                    ctx.strokeStyle = getStrokeColor(owner, rightOwner);
                     ctx.beginPath();
                     ctx.moveTo(offsetX + (x + 1) * TILE_SIZE, offsetY + y * TILE_SIZE);
                     ctx.lineTo(offsetX + (x + 1) * TILE_SIZE, offsetY + (y + 1) * TILE_SIZE);
                     ctx.stroke();
                 }
                 if (owner !== bottomOwner) {
-                    ctx.strokeStyle = "rgba(0,0,0,0.5)";
+                    ctx.strokeStyle = getStrokeColor(owner, bottomOwner);
                     ctx.beginPath();
                     ctx.moveTo(offsetX + x * TILE_SIZE, offsetY + (y + 1) * TILE_SIZE);
                     ctx.lineTo(offsetX + (x + 1) * TILE_SIZE, offsetY + (y + 1) * TILE_SIZE);
@@ -2307,7 +2391,7 @@ function renderMap() {
     }
 
     // 都市の描画
-    if (!isDrawing && mapMode === 'political') {
+    if (!isDrawing && (mapMode === 'political' || mapMode === 'alliance')) {
         nations.forEach(n => {
             if (n.isDead) return;
             n.cities.forEach((city, idx) => {
@@ -2336,37 +2420,84 @@ function renderMap() {
         // 国名の描画 (HOI4スタイル)
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        nations.forEach(n => {
-            // 傀儡国の名前は非表示
-            if (n.isPuppet) return;
-            
-            if (!n.isDead && n.largestComponentSize > 30) {
-                // mapScaleが小さい（ズームアウトしている）ほど、フォントサイズを大きくして視認性を維持
-                const baseSize = 10 / mapScale;
-                const sizeBonus = Math.min(12 / mapScale, (n.largestComponentSize / 600) / mapScale);
-                const fontSize = baseSize + sizeBonus;
-                
-                ctx.font = `bold ${fontSize}px "Yu Gothic", "SimHei", "Segoe UI", sans-serif`;
 
-                const drawX = offsetX + n.visualCentroid.x * TILE_SIZE;
-                const drawY = offsetY + n.visualCentroid.y * TILE_SIZE;
+        if (mapMode === 'alliance') {
+            // 同盟モード: 同盟ブロック名の描画
+            alliances.forEach(a => {
+                if (a.largestComponentSize > 30) {
+                    const baseSize = 10 / mapScale;
+                    const sizeBonus = Math.min(12 / mapScale, (a.largestComponentSize / 600) / mapScale);
+                    const fontSize = (baseSize + sizeBonus) * 1.2; // 同盟名は少し大きく
+                    
+                    ctx.font = `bold ${fontSize}px "Yu Gothic", "SimHei", "Segoe UI", sans-serif`;
+                    const drawX = offsetX + a.visualCentroid.x * TILE_SIZE;
+                    const drawY = offsetY + a.visualCentroid.y * TILE_SIZE;
+                    
+                    ctx.save();
+                    ctx.translate(drawX, drawY);
+                    ctx.rotate(a.visualAngle);
+                    ctx.strokeStyle = "rgba(0,0,0,0.8)";
+                    ctx.lineWidth = Math.max(3 / mapScale, 2);
+                    ctx.strokeText(a.name, 0, 0);
+                    ctx.fillStyle = a.color;
+                    ctx.fillText(a.name, 0, 0);
+                    ctx.restore();
+                }
+            });
+            // 同盟に属さない主要国も表示
+            nations.forEach(n => {
+                if (!n.isDead && !n.isPuppet && n.allianceId === -1 && n.largestComponentSize > 50) {
+                    const baseSize = 10 / mapScale;
+                    const sizeBonus = Math.min(12 / mapScale, (n.largestComponentSize / 600) / mapScale);
+                    const fontSize = baseSize + sizeBonus;
+                    ctx.font = `bold ${fontSize}px "Yu Gothic", "SimHei", "Segoe UI", sans-serif`;
+                    const drawX = offsetX + n.visualCentroid.x * TILE_SIZE;
+                    const drawY = offsetY + n.visualCentroid.y * TILE_SIZE;
+                    ctx.save();
+                    ctx.translate(drawX, drawY);
+                    ctx.rotate(n.visualAngle);
+                    ctx.strokeStyle = "rgba(0,0,0,0.8)";
+                    ctx.lineWidth = Math.max(3 / mapScale, 2);
+                    ctx.strokeText(n.name, 0, 0);
+                    ctx.fillStyle = n.color;
+                    ctx.fillText(n.name, 0, 0);
+                    ctx.restore();
+                }
+            });
+        } else {
+            // 通常モード (政治モードなど)
+            nations.forEach(n => {
+                // 傀儡国の名前は非表示
+                if (n.isPuppet) return;
                 
-                ctx.save();
-                ctx.translate(drawX, drawY);
-                ctx.rotate(n.visualAngle);
+                if (!n.isDead && n.largestComponentSize > 30) {
+                    // mapScaleが小さい（ズームアウトしている）ほど、フォントサイズを大きくして視認性を維持
+                    const baseSize = 10 / mapScale;
+                    const sizeBonus = Math.min(12 / mapScale, (n.largestComponentSize / 600) / mapScale);
+                    const fontSize = baseSize + sizeBonus;
+                    
+                    ctx.font = `bold ${fontSize}px "Yu Gothic", "SimHei", "Segoe UI", sans-serif`;
 
-                // 文字の縁取り (厚め)
-                ctx.strokeStyle = "rgba(0,0,0,0.8)";
-                ctx.lineWidth = Math.max(3 / mapScale, 2);
-                ctx.strokeText(n.name, 0, 0);
-                
-                // 文字本体
-                ctx.fillStyle = n.color;
-                ctx.fillText(n.name, 0, 0);
+                    const drawX = offsetX + n.visualCentroid.x * TILE_SIZE;
+                    const drawY = offsetY + n.visualCentroid.y * TILE_SIZE;
+                    
+                    ctx.save();
+                    ctx.translate(drawX, drawY);
+                    ctx.rotate(n.visualAngle);
 
-                ctx.restore();
-            }
-        });
+                    // 文字の縁取り (厚め)
+                    ctx.strokeStyle = "rgba(0,0,0,0.8)";
+                    ctx.lineWidth = Math.max(3 / mapScale, 2);
+                    ctx.strokeText(n.name, 0, 0);
+                    
+                    // 文字本体
+                    ctx.fillStyle = n.color;
+                    ctx.fillText(n.name, 0, 0);
+
+                    ctx.restore();
+                }
+            });
+        }
 
     }
 
@@ -3627,6 +3758,9 @@ function simulateTick() {
         worldTension = Math.max(0, worldTension - 30); // 緊張緩和するが完全平和ではない
     }
 
+    // Update alliance centroids for rendering
+    alliances.forEach(a => a.updateCentroid());
+
     // 1. 内政フェーズ
     nations.forEach(n => {
         if (n.isDead) return;
@@ -4198,6 +4332,7 @@ function formAlliance(n1, n2) {
         n1.allianceId = newAlliance.id;
         n2.allianceId = newAlliance.id;
         alliances.push(newAlliance);
+        newAlliance.updateCentroid();
         log(`同盟結成: 新たな軍事ブロック「${allianceName}」が結成されました。`, "log-peace");
     } else if (n1.allianceId !== -1 && n2.allianceId === -1) {
         // n2 joins n1's alliance block
@@ -4212,6 +4347,7 @@ function formAlliance(n1, n2) {
             });
             alliance.members.push(n2.id);
             n2.allianceId = alliance.id;
+            alliance.updateCentroid();
             alliance.addHistory(`${n2.name}が同盟に加入しました。`);
             log(`同盟加入: ${n2.name}が「${alliance.name}」に加入しました。`, "log-peace");
         }
@@ -4228,6 +4364,7 @@ function formAlliance(n1, n2) {
             });
             alliance.members.push(n1.id);
             n1.allianceId = alliance.id;
+            alliance.updateCentroid();
             alliance.addHistory(`${n1.name}が同盟に加入しました。`);
             log(`同盟加入: ${n1.name}が「${alliance.name}」に加入しました。`, "log-peace");
         }
@@ -4269,6 +4406,7 @@ function checkAllianceBlock(n) {
     if (!hasAlliesInBlock) {
         alliance.members = alliance.members.filter(mId => mId !== n.id);
         n.allianceId = -1;
+        alliance.updateCentroid();
         alliance.addHistory(`${n.name}が同盟を離脱しました。`);
         log(`同盟離脱: ${n.name}が同盟ブロック「${alliance.name}」を離脱しました。`, "log-info");
         
@@ -5144,7 +5282,10 @@ function loadGame(file) {
                 Object.setPrototypeOf(n, Nation.prototype);
                 n.cities.forEach(c => Object.setPrototypeOf(c, City.prototype));
             });
-            alliances.forEach(a => Object.setPrototypeOf(a, Alliance.prototype));
+            alliances.forEach(a => {
+                Object.setPrototypeOf(a, Alliance.prototype);
+                a.updateCentroid();
+            });
             organizations.forEach(o => Object.setPrototypeOf(o, InternationalOrganization.prototype));
             nations.forEach(n => n.updateCentroid());
             
