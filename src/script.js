@@ -4100,24 +4100,42 @@ function simulateTick() {
             });
         }
         
-        // ランダムな対象国を選ぶ (頻度向上)
-        const target = nations[Math.floor(Math.random() * nations.length)];
-        if (target.id === n.id || target.isDead) return;
+        // 対象国を選ぶ (20%の確率で最も親密な国、80%でランダム)
+        let target;
+        if (Math.random() < 0.2) {
+            let bestRel = -101;
+            let bestTarget = null;
+            nations.forEach(other => {
+                if (other.id !== n.id && !other.isDead) {
+                    const rel = n.relations[other.id] || 0;
+                    if (rel > bestRel) {
+                        bestRel = rel;
+                        bestTarget = other;
+                    }
+                }
+            });
+            target = bestTarget;
+        } else {
+            target = nations[Math.floor(Math.random() * nations.length)];
+        }
+        
+        if (!target || target.id === n.id || target.isDead) return;
 
         // 関係値初期化
         if (n.relations[target.id] === undefined) n.relations[target.id] = 0;
 
         // 同盟の形成と維持
         if (!n.isPuppet && !target.isPuppet) {
+            // 共通の敵がいるかチェック
+            let commonEnemy = false;
+            n.atWarWith.forEach(e => {
+                if (target.atWarWith.includes(e)) commonEnemy = true;
+            });
+
             // 同盟形成 (高関係かつ未同盟)
-            if (!n.allies.includes(target.id) && n.relations[target.id] > 80 && !n.atWarWith.includes(target.id)) {
-                // 共通の敵がいると確率アップ
-                let commonEnemy = false;
-                n.atWarWith.forEach(e => {
-                    if (target.atWarWith.includes(e)) commonEnemy = true;
-                });
-                
-                let chance = commonEnemy ? 0.05 : 0.005;
+            const relThreshold = commonEnemy ? 70 : 80;
+            if (!n.allies.includes(target.id) && n.relations[target.id] > relThreshold && !n.atWarWith.includes(target.id)) {
+                let chance = commonEnemy ? 0.15 : 0.02;
                 if (Math.random() < chance) {
                     formAlliance(n, target);
                 }
@@ -4135,16 +4153,23 @@ function simulateTick() {
         let change = (Math.random() - 0.5) * 5; 
         if (n.religion === target.religion) change += 5;
         else change -= 5;
+
+        // 政治体制が同じなら親近感
+        if (n.sysBroad === target.sysBroad) change += 3;
+
+        // 同じ国際機構に加盟していれば親近感
+        const sameOrg = organizations.some(org => org.members.includes(n.id) && org.members.includes(target.id));
+        if (sameOrg) change += 2;
         
         // Grand Empire: Hated by everyone
         if (n.isGrandEmpire) change -= 2.0;
 
         // 世界の緊張感による悪化
-        change -= (worldTension / 10);
+        change -= (worldTension / 20);
         
-        // 隣接していると摩擦が非常に起きやすい
+        // 隣接していると摩擦が起きやすい
         let neighbor = isNeighbor(n, target);
-        if (neighbor) change -= 10;
+        if (neighbor) change -= 3;
 
         // ボーダーインシデント (突発的な悪化)
         if (neighbor && Math.random() < 0.05) {
