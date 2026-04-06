@@ -5089,7 +5089,7 @@ function manageAlliedNations() {
         let alliedNations = alliances.find(a => a.id === alliedNationsId);
         if (!alliedNations) {
             const leader = democraticNations.sort((a,b) => b.gdp - a.gdp)[0];
-            alliedNations = new Alliance(allianceIdCounter++, "連合国", leader.id, "#0000bb"); // Blue color
+            alliedNations = new Alliance(allianceIdCounter++, "連合国", leader.id, "#4d91ff"); // Blue color
             alliances.push(alliedNations);
             alliedNationsId = alliedNations.id;
             log(`自由主義の危機！ インターナショナルの拡大に対抗するため、民主主義諸国による同盟「連合国」が結成されました。`, "log-war");
