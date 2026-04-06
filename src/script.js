@@ -89,14 +89,19 @@ const POLITICAL_SYSTEMS = {
 function generatePoliticalSystem(currentTech) {
     // 1. Broad Framework (Weight by Tech)
     let broad;
-    if (currentTech < 2) { // Primitive/Agrarian -> mostly Authoritarian
+    if (!isDemocracyAwakened) {
+        broad = Math.random() < 0.7 ? '権威主義' : '全体主義';
+    } else if (currentTech < 2) { // Primitive/Agrarian -> mostly Authoritarian
         broad = Math.random() < 0.8 ? '権威主義' : (Math.random() < 0.5 ? '全体主義' : '民主主義');
     } else {
         broad = POLITICAL_SYSTEMS.BROAD[Math.floor(Math.random() * POLITICAL_SYSTEMS.BROAD.length)];
     }
     
     // 2. Detailed System
-    const details = POLITICAL_SYSTEMS.DETAILED[broad];
+    let details = POLITICAL_SYSTEMS.DETAILED[broad];
+    if (!isDemocracyAwakened && broad === '権威主義') {
+        details = details.filter(d => d !== '立憲君主制');
+    }
     const detailed = details[Math.floor(Math.random() * details.length)];
     
     // 3. Sovereign
@@ -171,6 +176,7 @@ let mapDirty = true;
 let hegemonId = -1;
 let hegemonStatus = "";
 let highTensionDuration = 0;
+let isDemocracyAwakened = false;
 
 let alliances = [];
 let allianceIdCounter = 0;
@@ -1084,6 +1090,7 @@ function generateWorld() {
     document.getElementById('sim-panel').style.display = 'block';
 
     activeScenario = currentScenario;
+    isDemocracyAwakened = (activeScenario === 'TOTALLER_KRIEG' || activeScenario === 'GRACEFUL_US');
 
     // 1. 地形補正 (山と川)
     generateTerrainFeatures();
@@ -2691,7 +2698,7 @@ function handlePolitics(n) {
     }
 
     // 民主制への移行
-    if (n.sysBroad !== '民主主義' && n.tech >= 3 && n.stability > 80 && Math.random() < 0.001) {
+    if (isDemocracyAwakened && n.sysBroad !== '民主主義' && n.tech >= 3 && n.stability > 80 && Math.random() < 0.001) {
         // 徹底抗戦モードの枢軸国は民主化しない
         if (activeScenario === 'TOTALLER_KRIEG' && n.name === '枢軸国') return;
 
@@ -2911,15 +2918,15 @@ function grantIndependence(n, city) {
     
     // 都市名を冠した国名
     const prefix = city.name.substring(0, city.name.length - 1); // "市"などを取る
-    let proposedName = prefix + "共和国";
+    let proposedName = prefix + (isDemocracyAwakened ? "共和国" : "王国");
     
     // Ensure uniqueness
     if (isNationNameTaken(proposedName)) {
-        // proposedName is always "XXX共和国" here, so we use Nth regime format
+        // proposedName is always "XXX共和国/王国" here, so we use Nth regime/numbering format
         let counter = 2;
         let finalName = proposedName;
         while(true) {
-            let nextName = proposedName + "第" + counter + "政";
+            let nextName = isDemocracyAwakened ? (proposedName + "第" + counter + "政") : (proposedName + " (" + counter + ")");
             if (!isNationNameTaken(nextName)) {
                 finalName = nextName;
                 break;
@@ -2933,13 +2940,19 @@ function grantIndependence(n, city) {
     }
 
     const system = generatePoliticalSystem(n.tech);
-    newNation.sysBroad = '民主主義';
-    newNation.sysDetailed = '議院内閣制';
-    newNation.sovereign = '国民';
+    if (isDemocracyAwakened) {
+        newNation.sysBroad = '民主主義';
+        newNation.sysDetailed = '議院内閣制';
+        newNation.sovereign = '国民';
+        newNation.generateParties();
+    } else {
+        newNation.sysBroad = '権威主義';
+        newNation.sysDetailed = '絶対君主制';
+        newNation.sovereign = '君主';
+    }
     newNation.stateStruct = '単一国家';
     newNation.ecoIdeology = n.ecoIdeology;
     newNation.govType = newNation.sysDetailed;
-    newNation.generateParties();
     
     newNation.color = `hsl(${Math.random()*360}, 60%, 60%)`;
     newNation.tech = n.tech;
@@ -3002,26 +3015,37 @@ function triggerCityRebellion(n, cities) {
          rebel.sysDetailed = '軍事評議会制';
          rebel.sovereign = '軍部';
     } else {
-         // 権威主義からの反乱 -> 民主化革命
-         rebel.sysBroad = '民主主義';
-         rebel.sysDetailed = '革命政府';
-         rebel.sovereign = '国民';
+         // 権威主義からの反乱
+         if (isDemocracyAwakened) {
+             // 民主化革命
+             rebel.sysBroad = '民主主義';
+             rebel.sysDetailed = '革命政府';
+             rebel.sovereign = '国民';
+         } else {
+             // 別の君主を立てるか軍が掌握
+             rebel.sysBroad = '権威主義';
+             rebel.sysDetailed = Math.random() < 0.5 ? '絶対君主制' : '軍事評議会制';
+             rebel.sovereign = rebel.sysDetailed === '絶対君主制' ? '君主' : '軍部';
+         }
     }
     rebel.govType = rebel.sysDetailed;
 
     // かっこいい反乱軍の名称生成
-    const rebelTypes = [
-        { name: "臨時政府", gov: "臨時政府" },
-        { name: "立憲派", gov: "革命政府" },
-        { name: "正統政府", gov: "正統政府" },
-        { name: "救国戦線", gov: "軍事評議会制" },
-        { name: "人民委員会", gov: "革命政府" },
-        { name: "暫定政府", gov: "暫定政府" },
-        { name: "暫定統治機構", gov: "暫定統治機構" }
+    let rebelTypes = [
+        { name: "臨時政府", gov: "臨時政府", demo: true },
+        { name: "立憲派", gov: "革命政府", demo: true },
+        { name: "正統政府", gov: "正統政府", demo: false },
+        { name: "救国戦線", gov: "軍事評議会制", demo: false },
+        { name: "人民委員会", gov: "革命政府", demo: true },
+        { name: "暫定政府", gov: "暫定政府", demo: true },
+        { name: "暫定統治機構", gov: "暫定統治機構", demo: false }
     ];
+    if (!isDemocracyAwakened) {
+        rebelTypes = rebelTypes.filter(t => !t.demo);
+    }
     
     // 特別な名称: 共和国第n政 (親が民主制の場合)
-    if (n.sysBroad === '民主主義' && Math.random() < 0.4) {
+    if (isDemocracyAwakened && n.sysBroad === '民主主義' && Math.random() < 0.4) {
         rebel.sysBroad = '民主主義';
         rebel.sysDetailed = n.sysDetailed;
         rebel.sovereign = '国民';
@@ -3036,7 +3060,7 @@ function triggerCityRebellion(n, cities) {
         if (type.gov === '革命政府' || type.gov === '臨時政府' || type.gov === '暫定政府') {
             rebel.sysBroad = '民主主義';
             rebel.sovereign = '国民';
-            rebel.generateParties();
+            if (isDemocracyAwakened) rebel.generateParties();
         } else if (type.gov === '軍事評議会制' || type.gov === '暫定統治機構') {
             rebel.sysBroad = '権威主義';
             rebel.sovereign = '軍部';
@@ -3664,6 +3688,16 @@ function simulateDomesticPolitics(n) {
 }
 
 function simulateTick() {
+    // 民主主義の目覚めイベントのチェック
+    if (!isDemocracyAwakened) {
+        let maxTech = 0;
+        nations.forEach(n => { if (!n.isDead && n.tech > maxTech) maxTech = n.tech; });
+        if (maxTech >= 2 || year >= 1700) {
+            isDemocracyAwakened = true;
+            log("歴史的転換点: 「民主主義の目覚め」！ 民衆が自らの権利を主張し始め、共和制や立憲君主制の思想が広まりました。", "log-peace");
+        }
+    }
+
     updateMilitaryGrid();
     if (mapDirty) {
         updateContinents();
@@ -5300,6 +5334,7 @@ function saveGame() {
         organizations, orgIdCounter,
         year, worldTension,
         hegemonId, hegemonStatus, highTensionDuration,
+        isDemocracyAwakened,
         frameCounter, simSpeed
     };
     
@@ -5339,6 +5374,7 @@ function loadGame(file) {
             hegemonId = data.hegemonId;
             hegemonStatus = data.hegemonStatus;
             highTensionDuration = data.highTensionDuration;
+            isDemocracyAwakened = data.isDemocracyAwakened || false;
             frameCounter = data.frameCounter;
             simSpeed = data.simSpeed;
             
