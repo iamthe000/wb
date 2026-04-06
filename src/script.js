@@ -2359,7 +2359,7 @@ function renderMap() {
             const r1 = relationCache[o1];
             if (!r1) return "rgba(0,0,0,0.5)";
             if (r1.war.has(o2)) return "#5e0b0b"; // 暗い赤 (War)
-            if (r1.allies.has(o2)) return "#08c447"; // 暗い緑 (Allies)
+            if (r1.allies.has(o2)) return "#064021"; // 暗い緑 (Allies)
             return "rgba(0,0,0,0.5)";
         };
 
@@ -4126,6 +4126,46 @@ function simulateTick() {
 
         // 同盟の形成と維持
         if (!n.isPuppet && !target.isPuppet) {
+            // 自由主義国の判定 (民主主義または立憲君主制)
+            const isLiberal = (nat) => (nat.sysBroad === '民主主義' || nat.sysDetailed === '立憲君主制');
+            
+            // 自由主義国が少ない場合の「連合国」結成ロジック
+            const liberalNations = nations.filter(nat => !nat.isDead && isLiberal(nat));
+            const totalNations = nations.filter(nat => !nat.isDead).length;
+            const liberalRatio = liberalNations.length / (totalNations || 1);
+            
+            if (liberalRatio < 0.3 && isLiberal(n) && isLiberal(target)) {
+                // 関係が良好なら「連合国」として結集しやすい
+                if (!n.allies.includes(target.id) && n.relations[target.id] > 60 && !n.atWarWith.includes(target.id)) {
+                    if (Math.random() < 0.2) {
+                        const existingAllies = alliances.find(a => a.name === "連合国");
+                        if (existingAllies) {
+                            // 既存の「連合国」に加入
+                            if (n.allianceId === -1 && target.allianceId === existingAllies.id) {
+                                formAlliance(n, target);
+                            } else if (target.allianceId === -1 && n.allianceId === existingAllies.id) {
+                                formAlliance(n, target);
+                            } else if (n.allianceId === -1 && target.allianceId === -1) {
+                                // 両方未加入なら片方を加入させてからもう片方を呼ぶ (formAllianceの仕様に合わせる)
+                                formAlliance(n, target);
+                                const newA = alliances.find(a => a.members.includes(n.id) && a.members.includes(target.id));
+                                if (newA) newA.name = "連合国";
+                            } else {
+                                formAlliance(n, target);
+                            }
+                        } else {
+                            // 新規に「連合国」を結成
+                            formAlliance(n, target);
+                            const newA = alliances.find(a => a.members.includes(n.id) && a.members.includes(target.id));
+                            if (newA) {
+                                newA.name = "連合国";
+                                log(`自由主義の危機: ${n.name}と${target.name}は自由を守るため「連合国」を結成しました。`, "log-peace");
+                            }
+                        }
+                    }
+                }
+            }
+
             // 共通の敵がいるかチェック
             let commonEnemy = false;
             n.atWarWith.forEach(e => {
