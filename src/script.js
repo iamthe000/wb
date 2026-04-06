@@ -2359,7 +2359,7 @@ function renderMap() {
             const r1 = relationCache[o1];
             if (!r1) return "rgba(0,0,0,0.5)";
             if (r1.war.has(o2)) return "#5e0b0b"; // 暗い赤 (War)
-            if (r1.allies.has(o2)) return "#064021"; // 暗い緑 (Allies)
+            if (r1.allies.has(o2)) return "#08c447"; // 暗い緑 (Allies)
             return "rgba(0,0,0,0.5)";
         };
 
