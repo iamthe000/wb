@@ -1792,6 +1792,10 @@ class Nation {
         }
         return false;
     }
+
+    isSocialist() {
+        return (this.sysDetailed === '前衛党独裁' || (this.ecoIdeology && (this.ecoIdeology.includes('計画') || this.ecoIdeology.includes('統制')) && this.sysBroad === '全体主義'));
+    }
 }
 
 function spawnNations() {
@@ -2575,17 +2579,19 @@ function handlePolitics(n) {
         log(`${n.name}の指導者が${oldLeader}から${n.leader}に交代しました。(安定度: ${stabChange > 0 ? "+" : ""}${stabChange})`, "log-info");
         n.addHistory(`指導者交代: ${oldLeader} -> ${n.leader}`);
 
-        // Grand Empire Succession Crisis
-        if (n.isGrandEmpire && activeScenario !== 'TOTALLER_KRIEG') {
-            let collapseProb = 0.9;
-            let civilWarProb = 0.8;
+        // Grand Empire or Large Socialist Nation Succession Crisis
+        const isLargeSocialist = n.isSocialist() && n.tiles.length >= 40;
+
+        if ((n.isGrandEmpire || isLargeSocialist) && activeScenario !== 'TOTALLER_KRIEG') {
+            let collapseProb = n.isGrandEmpire ? 0.9 : 0.4;
+            let civilWarProb = n.isGrandEmpire ? 0.8 : 0.6;
             
             if (activeScenario === 'QUIET_SPARKS') {
-                collapseProb = 0.1;
-                civilWarProb = 0.2;
+                collapseProb *= 0.1;
+                civilWarProb *= 0.2;
             }
 
-            // 大帝国の崩壊 (高確率で群雄割拠へ)
+            // 大帝国や大規模社会主義国の崩壊 (群雄割拠へ)
             if (Math.random() < collapseProb) {
                 triggerImperialCollapse(n);
             } else if (n.cities.length >= 2 && Math.random() < civilWarProb) {
@@ -3176,7 +3182,7 @@ function triggerSuccessionCivilWar(n) {
     rebel.baseName = n.baseName;
     rebel.isRebel = false; // Claims to be legitimate
     
-    rebel.isGrandEmpire = true;
+    rebel.isGrandEmpire = n.isGrandEmpire;
     rebel.sysBroad = n.sysBroad;
     rebel.sysDetailed = n.sysDetailed;
     rebel.sovereign = n.sovereign;
@@ -3274,9 +3280,12 @@ function triggerSuccessionCivilWar(n) {
         declareWar(n, rebel);
         
         // Log
-        log(`帝位継承戦争: ${n.name}の皇帝崩御に伴い、国が二つに割れました！双方が正統性を主張しています。`, "log-war");
-        n.addHistory(`内戦勃発: 帝位継承戦争`);
-        rebel.addHistory(`内戦勃発: 帝位継承戦争`);
+        const warTitle = n.isSocialist() ? "権力闘争" : "帝位継承戦争";
+        const warDesc = n.isSocialist() ? `${n.name}の指導者交代に伴う権力闘争により、国が二つに割れました！` : `${n.name}の皇帝崩御に伴い、国が二つに割れました！双方が正統性を主張しています。`;
+        
+        log(`${warTitle}: ${warDesc}`, "log-war");
+        n.addHistory(`内戦勃発: ${warTitle}`);
+        rebel.addHistory(`内戦勃発: ${warTitle}`);
         
         // Reduce stability significantly
         n.stability = 30;
@@ -3296,7 +3305,11 @@ function triggerImperialCollapse(n) {
     if (activeScenario === 'TOTALLER_KRIEG') return;
     if (n.tiles.length < 5) return; 
 
-    log(`崩壊: 指導者の死をきっかけに、大帝国${n.name}は制御を失い、群雄割拠の時代へと突入しました！`, "log-war");
+    const collapseMsg = n.isSocialist() 
+        ? `崩壊: 指導者交代をきっかけに${n.name}の体制が瓦解し、各地で権力が分立しました！`
+        : `崩壊: 指導者の死をきっかけに、大帝国${n.name}は制御を失い、群雄割拠の時代へと突入しました！`;
+
+    log(collapseMsg, "log-war");
     n.addHistory(`滅亡: 指導者交代に伴う国家崩壊`);
 
     // Determine split centers
