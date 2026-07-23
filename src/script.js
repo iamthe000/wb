@@ -191,6 +191,19 @@ let allianceIdCounter = 0;
 let organizations = [];
 let orgIdCounter = 0;
 
+// ズーム・パン用
+let zoomLevel = 1.0;
+let panX = 0;
+let panY = 0;
+let isPanning = false;
+let lastMouseX = 0;
+let lastMouseY = 0;
+let isSpacePressed = false;
+let mouseDownX = 0;
+let mouseDownY = 0;
+let lastTouchDistance = 0;
+let lastTouchCenter = { x: 0, y: 0 };
+
 // マウス操作用
 let mousePressed = false;
 let mouseButton = 0; // 0:Left, 2:Right
@@ -346,40 +359,205 @@ function fbm(x, y, octaves) {
     return val;
 }
 
+function getTouchDistance(e) {
+    if (e.touches.length < 2) return 0;
+    const dx = e.touches[0].clientX - e.touches[1].clientX;
+    const dy = e.touches[0].clientY - e.touches[1].clientY;
+    return Math.sqrt(dx * dx + dy * dy);
+}
+
+function getTouchCenter(e) {
+    if (e.touches.length < 2) return { x: 0, y: 0 };
+    return {
+        x: (e.touches[0].clientX + e.touches[1].clientX) / 2,
+        y: (e.touches[0].clientY + e.touches[1].clientY) / 2
+    };
+}
+
 /**
  * 入力処理
  */
 function setupInput() {
-    // 描画ツール
-    canvas.addEventListener('mousedown', e => {
-        mousePressed = true;
-        mouseButton = e.button;
-        handleDraw(e);
-        handleSelect(e);
+    // 1. キーボードSpaceキーの監視
+    window.addEventListener('keydown', e => {
+        if (e.code === 'Space') {
+            isSpacePressed = true;
+            if (document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'SELECT') {
+                e.preventDefault();
+            }
+        }
     });
-    canvas.addEventListener('mousemove', e => {
-        handleDraw(e);
-        handleHover(e);
+    window.addEventListener('keyup', e => {
+        if (e.code === 'Space') {
+            isSpacePressed = false;
+        }
     });
-    window.addEventListener('mouseup', () => mousePressed = false);
 
-    // タッチ操作対応
-    canvas.addEventListener('touchstart', e => {
-        mousePressed = true;
-        mouseButton = 0; // タッチは左クリック扱い
-        handleDraw(e);
-        handleSelect(e);
+    // 2. マウスホイールによるズーム (カーソル位置中心)
+    canvas.addEventListener('wheel', e => {
         e.preventDefault();
+        const rect = canvas.getBoundingClientRect();
+        const mx = e.clientX - rect.left;
+        const my = e.clientY - rect.top;
+        
+        // Canvasの中心を基準とした相対座標
+        const rx = mx - canvas.width / 2;
+        const ry = my - canvas.height / 2;
+        
+        // ズーム方向
+        const factor = e.deltaY < 0 ? 1.15 : (1 / 1.15);
+        const newZoom = clamp(zoomLevel * factor, 0.5, 10.0);
+        
+        // カーソル中心を維持するための数学的変換
+        panX = rx - (rx - panX) * (newZoom / zoomLevel);
+        panY = ry - (ry - panY) * (newZoom / zoomLevel);
+        zoomLevel = newZoom;
     }, { passive: false });
-    canvas.addEventListener('touchmove', e => {
-        handleDraw(e);
-        handleHover(e);
-        e.preventDefault();
-    }, { passive: false });
-    canvas.addEventListener('touchend', () => {
-        mousePressed = false;
+
+    // 3. マウスドラッグ & 描画/パン
+    canvas.addEventListener('mousedown', e => {
+        mouseDownX = e.clientX;
+        mouseDownY = e.clientY;
+        lastMouseX = e.clientX;
+        lastMouseY = e.clientY;
+        
+        // パン開始条件: 中クリック、Spaceキー押下、または描画/編集モードではない時
+        const isMiddleClick = e.button === 1;
+        const isRightClick = e.button === 2;
+        const isDrawOrEdit = isDrawing || isTerrainEditMode;
+        
+        if (isMiddleClick || isSpacePressed || !isDrawOrEdit || (isRightClick && !isDrawOrEdit)) {
+            isPanning = true;
+            canvas.style.cursor = 'grabbing';
+        } else {
+            mousePressed = true;
+            mouseButton = e.button;
+            // 描画モード中は即座に描画
+            handleDraw(e);
+        }
     });
-    
+
+    canvas.addEventListener('mousemove', e => {
+        if (isPanning) {
+            const dx = e.clientX - lastMouseX;
+            const dy = e.clientY - lastMouseY;
+            panX += dx;
+            panY += dy;
+            lastMouseX = e.clientX;
+            lastMouseY = e.clientY;
+        } else {
+            if (mousePressed) {
+                handleDraw(e);
+            }
+            handleHover(e);
+        }
+    });
+
+    window.addEventListener('mouseup', e => {
+        if (isPanning) {
+            isPanning = false;
+            canvas.style.cursor = 'crosshair';
+            
+            // ドラッグではなく、クリック（移動量がごく僅か）だった場合の選択処理
+            const dist = Math.sqrt((e.clientX - mouseDownX) ** 2 + (e.clientY - mouseDownY) ** 2);
+            if (dist < 5 && e.button === 0) {
+                handleSelect(e);
+            }
+        } else if (mousePressed) {
+            mousePressed = false;
+            
+            const dist = Math.sqrt((e.clientX - mouseDownX) ** 2 + (e.clientY - mouseDownY) ** 2);
+            if (dist < 5 && e.button === 0) {
+                handleSelect(e);
+            }
+        }
+    });
+
+    // 4. タッチスクリーンピンチズーム & パン
+    canvas.addEventListener('touchstart', e => {
+        if (e.touches.length === 1) {
+            const isDrawOrEdit = isDrawing || isTerrainEditMode;
+            mouseDownX = e.touches[0].clientX;
+            mouseDownY = e.touches[0].clientY;
+            
+            if (!isDrawOrEdit) {
+                isPanning = true;
+                lastMouseX = e.touches[0].clientX;
+                lastMouseY = e.touches[0].clientY;
+            } else {
+                mousePressed = true;
+                mouseButton = 0;
+                handleDraw(e);
+            }
+        } else if (e.touches.length === 2) {
+            isPanning = false;
+            mousePressed = false;
+            lastTouchDistance = getTouchDistance(e);
+            lastTouchCenter = getTouchCenter(e);
+        }
+        e.preventDefault();
+    }, { passive: false });
+
+    canvas.addEventListener('touchmove', e => {
+        if (e.touches.length === 1) {
+            if (isPanning) {
+                const dx = e.touches[0].clientX - lastMouseX;
+                const dy = e.touches[0].clientY - lastMouseY;
+                panX += dx;
+                panY += dy;
+                lastMouseX = e.touches[0].clientX;
+                lastMouseY = e.touches[0].clientY;
+            } else if (mousePressed) {
+                handleDraw(e);
+            }
+            handleHover(e);
+        } else if (e.touches.length === 2) {
+            const dist = getTouchDistance(e);
+            const center = getTouchCenter(e);
+            
+            if (lastTouchDistance > 0) {
+                const factor = dist / lastTouchDistance;
+                const newZoom = clamp(zoomLevel * factor, 0.5, 10.0);
+                
+                const rect = canvas.getBoundingClientRect();
+                const rx = center.x - rect.left - canvas.width / 2;
+                const ry = center.y - rect.top - canvas.height / 2;
+                
+                panX = rx - (rx - panX) * (newZoom / zoomLevel);
+                panY = ry - (ry - panY) * (newZoom / zoomLevel);
+                zoomLevel = newZoom;
+            }
+            
+            panX += (center.x - lastTouchCenter.x);
+            panY += (center.y - lastTouchCenter.y);
+            
+            lastTouchDistance = dist;
+            lastTouchCenter = center;
+        }
+        e.preventDefault();
+    }, { passive: false });
+
+    canvas.addEventListener('touchend', e => {
+        if (isPanning) {
+            isPanning = false;
+            const clientX = e.changedTouches && e.changedTouches[0] ? e.changedTouches[0].clientX : 0;
+            const clientY = e.changedTouches && e.changedTouches[0] ? e.changedTouches[0].clientY : 0;
+            const dist = Math.sqrt((clientX - mouseDownX) ** 2 + (clientY - mouseDownY) ** 2);
+            if (dist < 5) {
+                handleSelect(e);
+            }
+        } else if (mousePressed) {
+            mousePressed = false;
+            const clientX = e.changedTouches && e.changedTouches[0] ? e.changedTouches[0].clientX : 0;
+            const clientY = e.changedTouches && e.changedTouches[0] ? e.changedTouches[0].clientY : 0;
+            const dist = Math.sqrt((clientX - mouseDownX) ** 2 + (clientY - mouseDownY) ** 2);
+            if (dist < 5) {
+                handleSelect(e);
+            }
+        }
+        lastTouchDistance = 0;
+    });
+
     // 右クリックメニュー無効化
     canvas.addEventListener('contextmenu', e => e.preventDefault());
 
@@ -590,6 +768,27 @@ function setupInput() {
     if (btnSpecialAlliancesMenu) {
         btnSpecialAlliancesMenu.addEventListener('click', toggleSpecialAlliances);
     }
+
+    // Map zoom & pan controls clicks
+    function zoomToCenter(factor) {
+        const newZoom = clamp(zoomLevel * factor, 0.5, 10.0);
+        panX = panX * (newZoom / zoomLevel);
+        panY = panY * (newZoom / zoomLevel);
+        zoomLevel = newZoom;
+    }
+
+    document.getElementById('btn-zoom-in').addEventListener('click', () => { zoomToCenter(1.15); });
+    document.getElementById('btn-zoom-out').addEventListener('click', () => { zoomToCenter(1 / 1.15); });
+    document.getElementById('btn-zoom-reset').addEventListener('click', () => {
+        zoomLevel = 1.0;
+        panX = 0;
+        panY = 0;
+    });
+
+    document.getElementById('btn-pan-up').addEventListener('click', () => { panY += 50; });
+    document.getElementById('btn-pan-down').addEventListener('click', () => { panY -= 50; });
+    document.getElementById('btn-pan-left').addEventListener('click', () => { panX += 50; });
+    document.getElementById('btn-pan-right').addEventListener('click', () => { panX -= 50; });
 
     updateSpecialAlliancesUI();
 }
@@ -1149,13 +1348,24 @@ function applyTileChange(idx, targetType) {
 
 function getGridPos(e) {
     const rect = canvas.getBoundingClientRect();
-    const clientX = e.clientX !== undefined ? e.clientX : (e.touches && e.touches[0] ? e.touches[0].clientX : 0);
-    const clientY = e.clientY !== undefined ? e.clientY : (e.touches && e.touches[0] ? e.touches[0].clientY : 0);
+    const clientX = e.clientX !== undefined ? e.clientX : 
+                    (e.touches && e.touches[0] ? e.touches[0].clientX : 
+                    (e.changedTouches && e.changedTouches[0] ? e.changedTouches[0].clientX : 0));
+    const clientY = e.clientY !== undefined ? e.clientY : 
+                    (e.touches && e.touches[0] ? e.touches[0].clientY : 
+                    (e.changedTouches && e.changedTouches[0] ? e.changedTouches[0].clientY : 0));
     
     const relX = clientX - rect.left - canvas.width/2;
     const relY = clientY - rect.top - canvas.height/2;
-    const x = Math.floor((relX / mapScale + (width*TILE_SIZE)/2) / TILE_SIZE);
-    const y = Math.floor((relY / mapScale + (height*TILE_SIZE)/2) / TILE_SIZE);
+    
+    const unpannedX = relX - panX;
+    const unpannedY = relY - panY;
+    
+    const scaledX = unpannedX / (mapScale * zoomLevel);
+    const scaledY = unpannedY / (mapScale * zoomLevel);
+    
+    const x = Math.floor((scaledX + (width*TILE_SIZE)/2) / TILE_SIZE);
+    const y = Math.floor((scaledY + (height*TILE_SIZE)/2) / TILE_SIZE);
     return {x, y};
 }
 
@@ -2261,13 +2471,298 @@ function loop() {
     animationFrame = requestAnimationFrame(loop);
 }
 
+function getOperationName(attacker, defender) {
+    const operationPrefixesJP = ["「旭日」", "「蒼天」", "「鳳凰」", "「鉄槌」", "「暁」", "「神風」", "「雷撃」", "「疾風」", "「怒濤」", "「金剛」"];
+    const operationSuffixesJP = ["制圧作戦", "侵攻作戦", "突破計画", "掃討作戦", "電撃作戦", "奪還計画"];
+    
+    const operationPrefixesEN = ["Op. ", "Plan ", "Project ", "Task Force "];
+    const operationSuffixesEN = ["Overlord", "Barbarossa", "Downfall", "Eclipse", "Vanguard", "Ironclad", "Chariot", "Cobra", "Avalanche"];
+    
+    // Stable hash based on IDs to prevent flickering
+    const seed = (attacker.id * 17 + defender.id * 31) % 100;
+    
+    if (attacker.cultureType === 'KANJI') {
+        const p = operationPrefixesJP[seed % operationPrefixesJP.length];
+        const s = operationSuffixesJP[(seed >> 1) % operationSuffixesJP.length];
+        return p + s;
+    } else {
+        const p = operationPrefixesEN[seed % operationPrefixesEN.length];
+        const s = operationSuffixesEN[(seed >> 1) % operationSuffixesEN.length];
+        return p + s;
+    }
+}
+
+function drawArrowheadOnLine(ctx, x1, y1, x2, y2, color) {
+    const angle = Math.atan2(y2 - y1, x2 - x1);
+    const dist = Math.sqrt((x2 - x1)**2 + (y2 - y1)**2);
+    if (dist < 15) return;
+    
+    // Flowing arrows along the line
+    const flowOffset = (Date.now() / 40) % 40;
+    
+    ctx.save();
+    ctx.fillStyle = color;
+    ctx.setLineDash([]);
+    ctx.shadowBlur = 0;
+    
+    // Draw running arrowheads
+    for (let d = flowOffset; d < dist - 15; d += 40) {
+        const ratio = d / dist;
+        const px = x1 + (x2 - x1) * ratio;
+        const py = y1 + (y2 - y1) * ratio;
+        
+        ctx.beginPath();
+        ctx.moveTo(px, py);
+        ctx.lineTo(px - 6 * Math.cos(angle - Math.PI / 6), py - 6 * Math.sin(angle - Math.PI / 6));
+        ctx.lineTo(px - 6 * Math.cos(angle + Math.PI / 6), py - 6 * Math.sin(angle + Math.PI / 6));
+        ctx.closePath();
+        ctx.fill();
+    }
+    
+    // Tip arrowhead at the absolute end
+    ctx.beginPath();
+    ctx.moveTo(x2, y2);
+    ctx.lineTo(x2 - 10 * Math.cos(angle - Math.PI / 6), y2 - 10 * Math.sin(angle - Math.PI / 6));
+    ctx.lineTo(x2 - 10 * Math.cos(angle + Math.PI / 6), y2 - 10 * Math.sin(angle + Math.PI / 6));
+    ctx.closePath();
+    ctx.fill();
+    
+    ctx.restore();
+}
+
+function drawArrowheadAlongCurve(ctx, x1, y1, cx, cy, x2, y2, color) {
+    const getBezierPoint = (t) => {
+        const u = 1 - t;
+        return {
+            x: u * u * x1 + 2 * u * t * cx + t * t * x2,
+            y: u * u * y1 + 2 * u * t * cy + t * t * y2
+        };
+    };
+    
+    const getBezierTangent = (t) => {
+        const u = 1 - t;
+        const tx = 2 * u * (cx - x1) + 2 * t * (x2 - cx);
+        const ty = 2 * u * (cy - y1) + 2 * t * (y2 - cy);
+        return Math.atan2(ty, tx);
+    };
+
+    ctx.save();
+    ctx.fillStyle = color;
+    ctx.setLineDash([]);
+    ctx.shadowBlur = 0;
+    
+    const numArrowheads = 3;
+    const flowOffset = (Date.now() / 1500) % (1 / numArrowheads);
+    
+    for (let i = 0; i < numArrowheads; i++) {
+        const t = (flowOffset + i / numArrowheads) % 1.0;
+        if (t < 0.1 || t > 0.9) continue;
+        
+        const pos = getBezierPoint(t);
+        const angle = getBezierTangent(t);
+        
+        ctx.beginPath();
+        ctx.moveTo(pos.x, pos.y);
+        ctx.lineTo(pos.x - 6 * Math.cos(angle - Math.PI / 6), pos.y - 6 * Math.sin(angle - Math.PI / 6));
+        ctx.lineTo(pos.x - 6 * Math.cos(angle + Math.PI / 6), pos.y - 6 * Math.sin(angle + Math.PI / 6));
+        ctx.closePath();
+        ctx.fill();
+    }
+    
+    // Tip arrowhead
+    const endAngle = getBezierTangent(0.98);
+    ctx.beginPath();
+    ctx.moveTo(x2, y2);
+    ctx.lineTo(x2 - 10 * Math.cos(endAngle - Math.PI / 6), y2 - 10 * Math.sin(endAngle - Math.PI / 6));
+    ctx.lineTo(x2 - 10 * Math.cos(endAngle + Math.PI / 6), y2 - 10 * Math.sin(endAngle + Math.PI / 6));
+    ctx.closePath();
+    ctx.fill();
+    
+    ctx.restore();
+}
+
+function drawTacticalLabel(ctx, x, y, label, color) {
+    ctx.save();
+    ctx.font = 'bold 8px "Yu Gothic", "SimHei", sans-serif';
+    const textWidth = ctx.measureText(label).width;
+    
+    // Background frame
+    ctx.fillStyle = "rgba(10, 12, 16, 0.9)";
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1;
+    ctx.fillRect(x - textWidth / 2 - 3, y - 5, textWidth + 6, 11);
+    ctx.strokeRect(x - textWidth / 2 - 3, y - 5, textWidth + 6, 11);
+    
+    // Text
+    ctx.fillStyle = color;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(label, x, y + 1);
+    ctx.restore();
+}
+
+function drawTacticalArrow(ctx, x1, y1, x2, y2, color, label, isAmphibious) {
+    ctx.save();
+    ctx.strokeStyle = color;
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 4;
+    ctx.lineWidth = 2;
+    
+    ctx.setLineDash([6, 5]);
+    ctx.lineDashOffset = -Math.floor(Date.now() / 60) % 11;
+    
+    ctx.beginPath();
+    if (isAmphibious) {
+        // Curved line for naval landing
+        const midX = (x1 + x2) / 2;
+        const midY = (y1 + y2) / 2 - Math.abs(x1 - x2) * 0.15 - 10;
+        ctx.moveTo(x1, y1);
+        ctx.quadraticCurveTo(midX, midY, x2, y2);
+        ctx.stroke();
+        
+        drawArrowheadAlongCurve(ctx, x1, y1, midX, midY, x2, y2, color);
+        drawTacticalLabel(ctx, midX, midY - 6, label, color);
+    } else {
+        // Straight line
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.stroke();
+        
+        drawArrowheadOnLine(ctx, x1, y1, x2, y2, color);
+        drawTacticalLabel(ctx, (x1 + x2) / 2, (y1 + y2) / 2 - 6, label, color);
+    }
+    ctx.restore();
+}
+
+function drawReinforcementLine(ctx, x1, y1, x2, y2, color) {
+    ctx.save();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1;
+    ctx.setLineDash([3, 3]);
+    ctx.lineDashOffset = -Math.floor(Date.now() / 100) % 6;
+    
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(x2, y2);
+    ctx.stroke();
+    ctx.restore();
+}
+
+function renderTacticalPlans(ctx, offsetX, offsetY) {
+    if (zoomLevel <= 1.2 || isDrawing) return;
+
+    // 1. Render Reinforcement flow lines for all nations at war
+    nations.forEach(n => {
+        if (n.isDead || n.atWarWith.length === 0 || n.cities.length <= 1) return;
+        
+        const capital = n.cities[0];
+        const cx = offsetX + (capital.tileIdx % width) * TILE_SIZE + TILE_SIZE / 2;
+        const cy = offsetY + Math.floor(capital.tileIdx / width) * TILE_SIZE + TILE_SIZE / 2;
+        
+        n.cities.slice(1).forEach(city => {
+            const rx = offsetX + (city.tileIdx % width) * TILE_SIZE + TILE_SIZE / 2;
+            const ry = offsetY + Math.floor(city.tileIdx / width) * TILE_SIZE + TILE_SIZE / 2;
+            drawReinforcementLine(ctx, rx, ry, cx, cy, "rgba(255, 183, 0, 0.45)"); // Semi-transparent amber
+        });
+    });
+
+    // 2. Render combat arrows between nations at war
+    const renderedArrows = new Set();
+
+    nations.forEach(attacker => {
+        if (attacker.isDead || attacker.atWarWith.length === 0) return;
+        
+        attacker.atWarWith.forEach(defId => {
+            const defender = nations.find(d => d.id === defId);
+            if (!defender || defender.isDead) return;
+            
+            // Generate a unique and stable order key to render once
+            const key = `${attacker.id}-${defId}`;
+            if (renderedArrows.has(key)) return;
+            renderedArrows.add(key);
+            
+            // Attacker visual centroid
+            const ax = offsetX + attacker.visualCentroid.x * TILE_SIZE;
+            const ay = offsetY + attacker.visualCentroid.y * TILE_SIZE;
+            
+            // Check neighbor status
+            const neighbor = isNeighbor(attacker, defender);
+            const canNavalInvade = (attacker.tech >= 3 && attacker.ships >= 20 && attacker.isCoastal() && defender.isCoastal());
+            
+            if (neighbor) {
+                // Find closest city of defender
+                let targetCity = defender.cities[0];
+                let minDist = Infinity;
+                
+                defender.cities.forEach(c => {
+                    const cx = c.tileIdx % width;
+                    const cy = Math.floor(c.tileIdx / width);
+                    const dist = (cx - attacker.visualCentroid.x)**2 + (cy - attacker.visualCentroid.y)**2;
+                    if (dist < minDist) {
+                        minDist = dist;
+                        targetCity = c;
+                    }
+                });
+                
+                let tx, ty;
+                if (targetCity) {
+                    tx = offsetX + (targetCity.tileIdx % width) * TILE_SIZE + TILE_SIZE / 2;
+                    ty = offsetY + Math.floor(targetCity.tileIdx / width) * TILE_SIZE + TILE_SIZE / 2;
+                } else {
+                    tx = offsetX + defender.visualCentroid.x * TILE_SIZE;
+                    ty = offsetY + defender.visualCentroid.y * TILE_SIZE;
+                }
+                
+                // Draw land invasion arrow (Red)
+                drawTacticalArrow(ctx, ax, ay, tx, ty, "rgba(255, 59, 48, 0.85)", getOperationName(attacker, defender), false);
+            } else if (canNavalInvade) {
+                // Curved amphibious arrow from closest coastal city of attacker to closest coastal city of defender
+                let startCity = attacker.cities[0];
+                let endCity = defender.cities[0];
+                
+                // Find closest cities
+                let minDist = Infinity;
+                attacker.cities.forEach(ac => {
+                    defender.cities.forEach(dc => {
+                        const ax_g = ac.tileIdx % width;
+                        const ay_g = Math.floor(ac.tileIdx / width);
+                        const dx_g = dc.tileIdx % width;
+                        const dy_g = Math.floor(dc.tileIdx / width);
+                        const dist = (ax_g - dx_g)**2 + (ay_g - dy_g)**2;
+                        if (dist < minDist) {
+                            minDist = dist;
+                            startCity = ac;
+                            endCity = dc;
+                        }
+                    });
+                });
+                
+                let sx = ax, sy = ay;
+                if (startCity) {
+                    sx = offsetX + (startCity.tileIdx % width) * TILE_SIZE + TILE_SIZE / 2;
+                    sy = offsetY + Math.floor(startCity.tileIdx / width) * TILE_SIZE + TILE_SIZE / 2;
+                }
+                
+                let tx = offsetX + defender.visualCentroid.x * TILE_SIZE, ty = offsetY + defender.visualCentroid.y * TILE_SIZE;
+                if (endCity) {
+                    tx = offsetX + (endCity.tileIdx % width) * TILE_SIZE + TILE_SIZE / 2;
+                    ty = offsetY + Math.floor(endCity.tileIdx / width) * TILE_SIZE + TILE_SIZE / 2;
+                }
+                
+                // Draw amphibious landing curved arrow (Cyan)
+                drawTacticalArrow(ctx, sx, sy, tx, ty, "rgba(0, 240, 255, 0.85)", getOperationName(attacker, defender), true);
+            }
+        });
+    });
+}
+
 function renderMap() {
     // 画面全体に収まるようにスケール調整（0.95倍のマージンを持たせる）
     mapScale = Math.min(canvas.width / (width * TILE_SIZE), canvas.height / (height * TILE_SIZE)) * 0.95;
 
     ctx.save();
-    ctx.translate(canvas.width / 2, canvas.height / 2);
-    ctx.scale(mapScale, mapScale);
+    ctx.translate(canvas.width / 2 + panX, canvas.height / 2 + panY);
+    ctx.scale(mapScale * zoomLevel, mapScale * zoomLevel);
     ctx.translate(-(width * TILE_SIZE) / 2, -(height * TILE_SIZE) / 2);
 
     const offsetX = 0;
@@ -2595,6 +3090,9 @@ function renderMap() {
         }
 
     }
+
+    // 戦術作戦計画と増援ラインの描画 (ズーム時のみ)
+    renderTacticalPlans(ctx, offsetX, offsetY);
 
     // 外枠
     ctx.strokeStyle = "#555";
