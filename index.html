@@ -42,6 +42,8 @@
     <h3>基本操作</h3>
     <p>
         <strong>マップデザイン:</strong> 左クリック/タッチで地形を描画、右クリックで消去。「塗りつぶしモード」で領域を一括変更可能です。シミュレーション開始後も「地形編集」ボタンで修正できます。<br>
+        <strong>マップ拡大・縮小 & 移動:</strong> マウスホイールでカーソル中心にズーム、またはタッチによるピンチ操作でズームできます。画面右下の「＋/－/⟲」や移動パッドでも操作可能です。ドラッグでマップを自由にスクロール(移動)できます。※地形編集モード中などは<strong>スペースキーを押しながらドラッグ</strong>、または<strong>右クリックドラッグ / 中クリックドラッグ</strong>で描画せずに移動できます。<br>
+        <strong>軍事作戦計画 & 増援路の可視化:</strong> マップを<strong>1.2倍以上に拡大（ズームイン）</strong>すると、現在進行中の軍事作戦（陸上侵攻計画は赤色の矢印、海上上陸計画は水色のカーブ矢印）や、各都市から首都・前線への軍の補給・増援進路（オレンジ色の破線）がリアルタイムでアニメーション表示されます。<br>
         <strong>地図モード:</strong> 政治、地形、軍事、同盟の4モードがあります。軍事モードでは部隊密度をヒートマップで視覚化します。
     </p>
 
@@ -97,6 +99,26 @@
         <div id="canvas-wrapper">
             <canvas id="gameCanvas"></canvas>
             <div id="hover-info"></div>
+            
+            <!-- Floating Map Controls Overlay (Zoom & Pan) -->
+            <div id="map-controls-overlay">
+                <div class="control-group zoom-controls">
+                    <button id="btn-zoom-in" class="control-btn" title="拡大">+</button>
+                    <button id="btn-zoom-reset" class="control-btn" title="リセット">⟲</button>
+                    <button id="btn-zoom-out" class="control-btn" title="縮小">-</button>
+                </div>
+                <div class="control-group pan-controls">
+                    <div class="pan-pad">
+                        <div class="pan-row"><button id="btn-pan-up" class="pan-btn" title="上へ">▲</button></div>
+                        <div class="pan-row">
+                            <button id="btn-pan-left" class="pan-btn" title="左へ">◀</button>
+                            <div class="pan-center"></div>
+                            <button id="btn-pan-right" class="pan-btn" title="右へ">▶</button>
+                        </div>
+                        <div class="pan-row"><button id="btn-pan-down" class="pan-btn" title="下へ">▼</button></div>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
     
