@@ -184,6 +184,7 @@ let isSocialismSprouted = false;
 let internationalAllianceId = -1;
 let internationalVersion = 1;
 let alliedNationsId = -1;
+let isSpecialAlliancesEnabled = true;
 
 let alliances = [];
 let allianceIdCounter = 0;
@@ -571,6 +572,81 @@ function setupInput() {
         
         log(`${n.name}の国家体制が編集されました。`, "log-info");
     });
+
+    // Special Alliances Toggle Button Setup
+    const toggleSpecialAlliances = () => {
+        isSpecialAlliancesEnabled = !isSpecialAlliancesEnabled;
+        updateSpecialAlliancesUI();
+        if (!isSpecialAlliancesEnabled) {
+            checkAndDissolveSpecialAlliances();
+        }
+    };
+    
+    const btnSpecialAlliancesSim = document.getElementById('btn-special-alliances');
+    if (btnSpecialAlliancesSim) {
+        btnSpecialAlliancesSim.addEventListener('click', toggleSpecialAlliances);
+    }
+    const btnSpecialAlliancesMenu = document.getElementById('btn-special-alliances-menu');
+    if (btnSpecialAlliancesMenu) {
+        btnSpecialAlliancesMenu.addEventListener('click', toggleSpecialAlliances);
+    }
+
+    updateSpecialAlliancesUI();
+}
+
+function updateSpecialAlliancesUI() {
+    const btnSim = document.getElementById('btn-special-alliances');
+    const btnMenu = document.getElementById('btn-special-alliances-menu');
+    
+    const text = `インターナショナルと連合国: ${isSpecialAlliancesEnabled ? 'オン' : 'オフ'}`;
+    const bg = isSpecialAlliancesEnabled ? '#27ae60' : '#c0392b';
+    
+    if (btnSim) {
+        btnSim.innerText = text;
+        btnSim.style.background = bg;
+    }
+    if (btnMenu) {
+        btnMenu.innerText = text;
+        btnMenu.style.background = bg;
+    }
+}
+
+function checkAndDissolveSpecialAlliances() {
+    if (!isSpecialAlliancesEnabled) {
+        // Dissolve International
+        if (internationalAllianceId !== -1) {
+            const international = alliances.find(a => a.id === internationalAllianceId);
+            if (international) {
+                international.members.forEach(mId => {
+                    const m = nations.find(nat => nat.id === mId);
+                    if (m) {
+                        m.allianceId = -1;
+                        m.allies = [];
+                    }
+                });
+                alliances = alliances.filter(a => a.id !== internationalAllianceId);
+                log(`システムが無効化されたため、${international.name}は解散しました。`, "log-info");
+            }
+            internationalAllianceId = -1;
+        }
+        
+        // Dissolve Allied Nations
+        if (alliedNationsId !== -1) {
+            const oldA = alliances.find(a => a.id === alliedNationsId);
+            if (oldA) {
+                oldA.members.forEach(mId => {
+                    const m = nations.find(nat => nat.id === mId);
+                    if (m) {
+                        m.allianceId = -1;
+                        m.allies = [];
+                    }
+                });
+                alliances = alliances.filter(a => a.id !== alliedNationsId);
+                log("システムが無効化されたため、連合国は解散しました。", "log-info");
+            }
+            alliedNationsId = -1;
+        }
+    }
 }
 
 function openRelationsModal() {
@@ -4985,6 +5061,7 @@ function makePeace(n1, n2) {
 }
 
 function manageTheInternational() {
+    if (!isSpecialAlliancesEnabled) return;
     if (!isSocialismSprouted) return;
 
     // 社会主義・共産主義国家を特定
@@ -5050,6 +5127,7 @@ function manageTheInternational() {
 }
 
 function manageAlliedNations() {
+    if (!isSpecialAlliancesEnabled) return;
     // インターナショナルが存在し、かつ一定以上の勢力（世界のタイルの20%以上）を持っている場合に結成を検討
     const international = alliances.find(a => a.id === internationalAllianceId);
     if (!international) {
@@ -5554,6 +5632,7 @@ function saveGame() {
         isDemocracyAwakened, isSocialismSprouted,
         internationalAllianceId, internationalVersion,
         alliedNationsId,
+        isSpecialAlliancesEnabled,
         frameCounter, simSpeed
     };
     
@@ -5598,6 +5677,7 @@ function loadGame(file) {
             internationalAllianceId = data.internationalAllianceId !== undefined ? data.internationalAllianceId : -1;
             internationalVersion = data.internationalVersion || 1;
             alliedNationsId = data.alliedNationsId !== undefined ? data.alliedNationsId : -1;
+            isSpecialAlliancesEnabled = data.isSpecialAlliancesEnabled !== undefined ? data.isSpecialAlliancesEnabled : true;
             frameCounter = data.frameCounter;
             simSpeed = data.simSpeed;
             
@@ -5621,6 +5701,7 @@ function loadGame(file) {
             document.getElementById('info-tension').innerText = worldTension.toFixed(1) + "%";
             document.getElementById('top-ui-tension').innerText = worldTension.toFixed(1) + "%";
             document.getElementById('simSpeed').value = simSpeed;
+            updateSpecialAlliancesUI();
             
             // Switch to sim mode
             document.getElementById('menu-panel').style.display = 'none';
