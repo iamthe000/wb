@@ -2769,10 +2769,8 @@ function drawTacticalArrow(ctx, x1, y1, x2, y2, color, label, isAmphibious) {
     // LAYER 3: Flowing arrows along the curve / line
     if (isAmphibious) {
         drawArrowheadAlongCurve(ctx, x1, y1, midX, midY, x2, y2, foregroundColor);
-        drawTacticalLabel(ctx, midX, midY - 6, label, foregroundColor);
     } else {
         drawArrowheadOnLine(ctx, x1, y1, x2, y2, foregroundColor);
-        drawTacticalLabel(ctx, (x1 + x2) / 2, (y1 + y2) / 2 - 6, label, foregroundColor);
     }
 }
 
