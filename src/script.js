@@ -284,8 +284,12 @@ window.onload = () => {
 
 function resizeCanvas() {
     const container = document.getElementById('canvas-wrapper');
-    canvas.width = container.clientWidth;
-    canvas.height = container.clientHeight;
+    const rect = container.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = rect.width * dpr;
+    canvas.height = rect.height * dpr;
+    canvas.style.width = rect.width + 'px';
+    canvas.style.height = rect.height + 'px';
 }
 
 function initGrid(size) {
@@ -401,8 +405,8 @@ function setupInput() {
         const my = e.clientY - rect.top;
         
         // Canvasの中心を基準とした相対座標
-        const rx = mx - canvas.width / 2;
-        const ry = my - canvas.height / 2;
+        const rx = mx - rect.width / 2;
+        const ry = my - rect.height / 2;
         
         // ズーム方向
         const factor = e.deltaY < 0 ? 1.15 : (1 / 1.15);
@@ -520,8 +524,8 @@ function setupInput() {
                 const newZoom = clamp(zoomLevel * factor, 0.5, 10.0);
                 
                 const rect = canvas.getBoundingClientRect();
-                const rx = center.x - rect.left - canvas.width / 2;
-                const ry = center.y - rect.top - canvas.height / 2;
+                const rx = center.x - rect.left - rect.width / 2;
+                const ry = center.y - rect.top - rect.height / 2;
                 
                 panX = rx - (rx - panX) * (newZoom / zoomLevel);
                 panY = ry - (ry - panY) * (newZoom / zoomLevel);
@@ -1355,8 +1359,8 @@ function getGridPos(e) {
                     (e.touches && e.touches[0] ? e.touches[0].clientY : 
                     (e.changedTouches && e.changedTouches[0] ? e.changedTouches[0].clientY : 0));
     
-    const relX = clientX - rect.left - canvas.width/2;
-    const relY = clientY - rect.top - canvas.height/2;
+    const relX = clientX - rect.left - rect.width/2;
+    const relY = clientY - rect.top - rect.height/2;
     
     const unpannedX = relX - panX;
     const unpannedY = relY - panY;
@@ -2459,14 +2463,20 @@ function updateGame() {
 }
 
 function loop() {
+    const dpr = window.devicePixelRatio || 1;
     ctx.fillStyle = "#222";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    ctx.save();
+    ctx.scale(dpr, dpr);
 
     renderMap();
     
     // Logic is now handled by updateGame via Worker
 
     if (selectedNationId !== -1) updateNationPanel();
+
+    ctx.restore();
 
     animationFrame = requestAnimationFrame(loop);
 }
@@ -2492,6 +2502,60 @@ function getOperationName(attacker, defender) {
     }
 }
 
+let activeTacticalLabels = [];
+
+function clearActiveTacticalLabels() {
+    activeTacticalLabels = [];
+}
+
+function getNonOverlappingY(x, y, width, height) {
+    let currentY = y;
+    let foundOverlap = true;
+    let attempts = 0;
+    const maxAttempts = 20;
+    const shiftStep = 15; // Shift up/down to find a free space
+
+    while (foundOverlap && attempts < maxAttempts) {
+        foundOverlap = false;
+        const box = {
+            left: x - width / 2 - 8,
+            right: x + width / 2 + 8,
+            top: currentY - height / 2 - 4,
+            bottom: currentY + height / 2 + 4
+        };
+
+        for (const existing of activeTacticalLabels) {
+            // Check for collision
+            const isOverlap = !(
+                box.right < existing.left ||
+                box.left > existing.right ||
+                box.bottom < existing.top ||
+                box.top > existing.bottom
+            );
+
+            if (isOverlap) {
+                foundOverlap = true;
+                // Alternate shifting up and down
+                const sign = (attempts % 2 === 0) ? -1 : 1;
+                const multiplier = Math.floor(attempts / 2) + 1;
+                currentY = y + sign * multiplier * shiftStep;
+                break;
+            }
+        }
+        attempts++;
+    }
+
+    // Record the final non-overlapping box
+    activeTacticalLabels.push({
+        left: x - width / 2 - 8,
+        right: x + width / 2 + 8,
+        top: currentY - height / 2 - 4,
+        bottom: currentY + height / 2 + 4
+    });
+
+    return currentY;
+}
+
 function drawArrowheadOnLine(ctx, x1, y1, x2, y2, color) {
     const angle = Math.atan2(y2 - y1, x2 - x1);
     const dist = Math.sqrt((x2 - x1)**2 + (y2 - y1)**2);
@@ -2513,8 +2577,8 @@ function drawArrowheadOnLine(ctx, x1, y1, x2, y2, color) {
         
         ctx.beginPath();
         ctx.moveTo(px, py);
-        ctx.lineTo(px - 6 * Math.cos(angle - Math.PI / 6), py - 6 * Math.sin(angle - Math.PI / 6));
-        ctx.lineTo(px - 6 * Math.cos(angle + Math.PI / 6), py - 6 * Math.sin(angle + Math.PI / 6));
+        ctx.lineTo(px - 5 * Math.cos(angle - Math.PI / 6), py - 5 * Math.sin(angle - Math.PI / 6));
+        ctx.lineTo(px - 5 * Math.cos(angle + Math.PI / 6), py - 5 * Math.sin(angle + Math.PI / 6));
         ctx.closePath();
         ctx.fill();
     }
@@ -2522,8 +2586,8 @@ function drawArrowheadOnLine(ctx, x1, y1, x2, y2, color) {
     // Tip arrowhead at the absolute end
     ctx.beginPath();
     ctx.moveTo(x2, y2);
-    ctx.lineTo(x2 - 10 * Math.cos(angle - Math.PI / 6), y2 - 10 * Math.sin(angle - Math.PI / 6));
-    ctx.lineTo(x2 - 10 * Math.cos(angle + Math.PI / 6), y2 - 10 * Math.sin(angle + Math.PI / 6));
+    ctx.lineTo(x2 - 9 * Math.cos(angle - Math.PI / 6), y2 - 9 * Math.sin(angle - Math.PI / 6));
+    ctx.lineTo(x2 - 9 * Math.cos(angle + Math.PI / 6), y2 - 9 * Math.sin(angle + Math.PI / 6));
     ctx.closePath();
     ctx.fill();
     
@@ -2563,8 +2627,8 @@ function drawArrowheadAlongCurve(ctx, x1, y1, cx, cy, x2, y2, color) {
         
         ctx.beginPath();
         ctx.moveTo(pos.x, pos.y);
-        ctx.lineTo(pos.x - 6 * Math.cos(angle - Math.PI / 6), pos.y - 6 * Math.sin(angle - Math.PI / 6));
-        ctx.lineTo(pos.x - 6 * Math.cos(angle + Math.PI / 6), pos.y - 6 * Math.sin(angle + Math.PI / 6));
+        ctx.lineTo(pos.x - 5 * Math.cos(angle - Math.PI / 6), pos.y - 5 * Math.sin(angle - Math.PI / 6));
+        ctx.lineTo(pos.x - 5 * Math.cos(angle + Math.PI / 6), pos.y - 5 * Math.sin(angle + Math.PI / 6));
         ctx.closePath();
         ctx.fill();
     }
@@ -2573,8 +2637,8 @@ function drawArrowheadAlongCurve(ctx, x1, y1, cx, cy, x2, y2, color) {
     const endAngle = getBezierTangent(0.98);
     ctx.beginPath();
     ctx.moveTo(x2, y2);
-    ctx.lineTo(x2 - 10 * Math.cos(endAngle - Math.PI / 6), y2 - 10 * Math.sin(endAngle - Math.PI / 6));
-    ctx.lineTo(x2 - 10 * Math.cos(endAngle + Math.PI / 6), y2 - 10 * Math.sin(endAngle + Math.PI / 6));
+    ctx.lineTo(x2 - 9 * Math.cos(endAngle - Math.PI / 6), y2 - 9 * Math.sin(endAngle - Math.PI / 6));
+    ctx.lineTo(x2 - 9 * Math.cos(endAngle + Math.PI / 6), y2 - 9 * Math.sin(endAngle + Math.PI / 6));
     ctx.closePath();
     ctx.fill();
     
@@ -2583,55 +2647,133 @@ function drawArrowheadAlongCurve(ctx, x1, y1, cx, cy, x2, y2, color) {
 
 function drawTacticalLabel(ctx, x, y, label, color) {
     ctx.save();
-    ctx.font = 'bold 8px "Yu Gothic", "SimHei", sans-serif';
+    ctx.font = 'bold 9px "Segoe UI", "Yu Gothic", "SimHei", sans-serif';
     const textWidth = ctx.measureText(label).width;
+    const labelHeight = 13;
     
-    // Background frame
-    ctx.fillStyle = "rgba(10, 12, 16, 0.9)";
+    // Resolve overlap (using textWidth + 12 to leave room for the LED indicator dot)
+    const deconflictedY = getNonOverlappingY(x, y, textWidth + 12, labelHeight);
+    
+    const padX = 6;
+    const padY = 3;
+    const rectX = x - textWidth / 2 - padX - 4;
+    const rectY = deconflictedY - labelHeight / 2 - padY;
+    const rectW = textWidth + padX * 2 + 8;
+    const rectH = labelHeight + padY * 2;
+    
+    // 1. Shadow glow
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 6;
+    
+    // 2. Main Background Panel (Semi-transparent dark glassmorphism)
+    ctx.fillStyle = "rgba(10, 12, 16, 0.92)";
+    ctx.beginPath();
+    if (ctx.roundRect) {
+        ctx.roundRect(rectX, rectY, rectW, rectH, 3);
+    } else {
+        ctx.rect(rectX, rectY, rectW, rectH);
+    }
+    ctx.fill();
+    
+    // 3. Glowing Border
+    ctx.shadowBlur = 0; // Disable shadow for clean borders
     ctx.strokeStyle = color;
     ctx.lineWidth = 1;
-    ctx.fillRect(x - textWidth / 2 - 3, y - 5, textWidth + 6, 11);
-    ctx.strokeRect(x - textWidth / 2 - 3, y - 5, textWidth + 6, 11);
+    ctx.beginPath();
+    if (ctx.roundRect) {
+        ctx.roundRect(rectX, rectY, rectW, rectH, 3);
+    } else {
+        ctx.rect(rectX, rectY, rectW, rectH);
+    }
+    ctx.stroke();
     
-    // Text
+    // 4. Cyber HUD corner brackets (Outer visual enhancement)
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.5;
+    const len = 3;
+    // Top-Left
+    ctx.beginPath();
+    ctx.moveTo(rectX - 1, rectY + len);
+    ctx.lineTo(rectX - 1, rectY - 1);
+    ctx.lineTo(rectX + len, rectY - 1);
+    ctx.stroke();
+    // Bottom-Right
+    ctx.beginPath();
+    ctx.moveTo(rectX + rectW + 1, rectY + rectH - len);
+    ctx.lineTo(rectX + rectW + 1, rectY + rectH + 1);
+    ctx.lineTo(rectX + rectW - len, rectY + rectH + 1);
+    ctx.stroke();
+    
+    // 5. LED Status Dot
     ctx.fillStyle = color;
-    ctx.textAlign = "center";
+    ctx.beginPath();
+    ctx.arc(rectX + padX + 2, deconflictedY, 2.5, 0, Math.PI * 2);
+    ctx.fill();
+    
+    // 6. Text Label
+    ctx.fillStyle = "#ffffff";
+    ctx.textAlign = "left";
     ctx.textBaseline = "middle";
-    ctx.fillText(label, x, y + 1);
+    ctx.fillText(label, rectX + padX + 9, deconflictedY);
+    
     ctx.restore();
 }
 
 function drawTacticalArrow(ctx, x1, y1, x2, y2, color, label, isAmphibious) {
     ctx.save();
-    ctx.strokeStyle = color;
-    ctx.shadowColor = color;
-    ctx.shadowBlur = 4;
-    ctx.lineWidth = 2;
     
-    ctx.setLineDash([6, 5]);
-    ctx.lineDashOffset = -Math.floor(Date.now() / 60) % 11;
+    const isRed = color.includes("255, 59, 48");
+    const baseColor = isRed ? "rgba(255, 59, 48, 0.18)" : "rgba(0, 240, 255, 0.18)";
+    const foregroundColor = color;
+    
+    let midX, midY;
+    if (isAmphibious) {
+        midX = (x1 + x2) / 2;
+        midY = (y1 + y2) / 2 - Math.abs(x1 - x2) * 0.15 - 10;
+    }
+
+    // LAYER 1: Thick translucent solid base path (representing the operations corridor)
+    ctx.strokeStyle = baseColor;
+    ctx.lineWidth = 4.5;
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    if (isAmphibious) {
+        ctx.moveTo(x1, y1);
+        ctx.quadraticCurveTo(midX, midY, x2, y2);
+    } else {
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+    }
+    ctx.stroke();
+
+    // LAYER 2: Thin bright animated foreground line with marching pattern and glowing drop shadow
+    ctx.strokeStyle = foregroundColor;
+    ctx.lineWidth = 1.2;
+    ctx.shadowColor = foregroundColor;
+    ctx.shadowBlur = 4;
+    ctx.setLineDash([5, 5]);
+    ctx.lineDashOffset = -Math.floor(Date.now() / 60) % 10;
     
     ctx.beginPath();
     if (isAmphibious) {
-        // Curved line for naval landing
-        const midX = (x1 + x2) / 2;
-        const midY = (y1 + y2) / 2 - Math.abs(x1 - x2) * 0.15 - 10;
         ctx.moveTo(x1, y1);
         ctx.quadraticCurveTo(midX, midY, x2, y2);
-        ctx.stroke();
-        
-        drawArrowheadAlongCurve(ctx, x1, y1, midX, midY, x2, y2, color);
-        drawTacticalLabel(ctx, midX, midY - 6, label, color);
     } else {
-        // Straight line
         ctx.moveTo(x1, y1);
         ctx.lineTo(x2, y2);
-        ctx.stroke();
-        
-        drawArrowheadOnLine(ctx, x1, y1, x2, y2, color);
-        drawTacticalLabel(ctx, (x1 + x2) / 2, (y1 + y2) / 2 - 6, label, color);
     }
+    ctx.stroke();
+    
     ctx.restore();
+
+    // LAYER 3: Flowing arrows along the curve / line
+    if (isAmphibious) {
+        drawArrowheadAlongCurve(ctx, x1, y1, midX, midY, x2, y2, foregroundColor);
+        drawTacticalLabel(ctx, midX, midY - 6, label, foregroundColor);
+    } else {
+        drawArrowheadOnLine(ctx, x1, y1, x2, y2, foregroundColor);
+        drawTacticalLabel(ctx, (x1 + x2) / 2, (y1 + y2) / 2 - 6, label, foregroundColor);
+    }
 }
 
 function drawReinforcementLine(ctx, x1, y1, x2, y2, color) {
@@ -2650,6 +2792,9 @@ function drawReinforcementLine(ctx, x1, y1, x2, y2, color) {
 
 function renderTacticalPlans(ctx, offsetX, offsetY) {
     if (zoomLevel <= 1.2 || isDrawing) return;
+
+    // Clear active labels tracking list for the new frame
+    clearActiveTacticalLabels();
 
     // 1. Render Reinforcement flow lines for all nations at war
     nations.forEach(n => {
@@ -2757,11 +2902,13 @@ function renderTacticalPlans(ctx, offsetX, offsetY) {
 }
 
 function renderMap() {
+    const logicalWidth = canvas.clientWidth;
+    const logicalHeight = canvas.clientHeight;
     // 画面全体に収まるようにスケール調整（0.95倍のマージンを持たせる）
-    mapScale = Math.min(canvas.width / (width * TILE_SIZE), canvas.height / (height * TILE_SIZE)) * 0.95;
+    mapScale = Math.min(logicalWidth / (width * TILE_SIZE), logicalHeight / (height * TILE_SIZE)) * 0.95;
 
     ctx.save();
-    ctx.translate(canvas.width / 2 + panX, canvas.height / 2 + panY);
+    ctx.translate(logicalWidth / 2 + panX, logicalHeight / 2 + panY);
     ctx.scale(mapScale * zoomLevel, mapScale * zoomLevel);
     ctx.translate(-(width * TILE_SIZE) / 2, -(height * TILE_SIZE) / 2);
 
