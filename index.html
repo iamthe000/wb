@@ -5,39 +5,39 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>TERL</title>
     <link rel="stylesheet" href="src/style.css">
-<link rel="apple-touch-icon" href="icon192x192.png">
-<link rel="icon" href="icon192x192.png">
-<link rel="manifest" href="manifest.json">
-
+    <link rel="apple-touch-icon" href="icon192x192.png">
+    <link rel="icon" href="icon192x192.png">
+    <link rel="manifest" href="manifest.json">
 </head>
 <body>
 
-<div id="history-modal" style="display:none; position:fixed; top:50%; left:50%; transform:translate(-50%, -50%); background:#222; border:1px solid #444; padding:20px; z-index:1000; width:300px; max-height:80vh; overflow-y:auto; box-shadow: 0 0 20px rgba(0,0,0,0.8);">
-    <h2 style="margin-top:0; border-bottom:1px solid #555; padding-bottom:5px;">国家系譜</h2>
+<!-- Modals Wrapper with custom classes -->
+<div id="history-modal" class="custom-modal" style="display:none; width:320px;">
+    <h2>国家系譜</h2>
     <div id="history-list" style="font-size:0.9em; line-height:1.4;"></div>
-    <button onclick="document.getElementById('history-modal').style.display='none'" style="margin-top:15px;">閉じる</button>
+    <button onclick="document.getElementById('history-modal').style.display='none'">閉じる</button>
 </div>
 
-<div id="relations-modal" style="display:none; position:fixed; top:50%; left:50%; transform:translate(-50%, -50%); background:#222; border:1px solid #444; padding:20px; z-index:1000; width:90%; max-width:500px; max-height:80vh; overflow-y:auto; box-shadow: 0 0 20px rgba(0,0,0,0.8);">
-    <h2 style="margin-top:0; border-bottom:1px solid #555; padding-bottom:5px;">国際関係</h2>
+<div id="relations-modal" class="custom-modal" style="display:none; width:90%; max-width:500px;">
+    <h2>国際関係</h2>
     <div id="relations-list" style="font-size:0.9em; line-height:1.4;"></div>
-    <button onclick="document.getElementById('relations-modal').style.display='none'" style="margin-top:15px; width:100%;">閉じる</button>
+    <button onclick="document.getElementById('relations-modal').style.display='none'" style="width:100%;">閉じる</button>
 </div>
 
-<div id="ranking-modal" style="display:none; position:fixed; top:50%; left:50%; transform:translate(-50%, -50%); background:#222; border:1px solid #444; padding:20px; z-index:1000; width:90%; max-width:800px; max-height:80vh; overflow-y:auto; box-shadow: 0 0 20px rgba(0,0,0,0.8);">
-    <h2 style="margin-top:0; border-bottom:1px solid #555; padding-bottom:5px;">国力ランキング</h2>
+<div id="ranking-modal" class="custom-modal" style="display:none; width:90%; max-width:800px;">
+    <h2>国力ランキング</h2>
     <div id="ranking-content"></div>
-    <button onclick="document.getElementById('ranking-modal').style.display='none'" style="margin-top:15px; width:100%;">閉じる</button>
+    <button onclick="document.getElementById('ranking-modal').style.display='none'" style="width:100%;">閉じる</button>
 </div>
 
-<div id="alliances-modal" style="display:none; position:fixed; top:50%; left:50%; transform:translate(-50%, -50%); background:#222; border:1px solid #444; padding:20px; z-index:1000; width:90%; max-width:800px; max-height:80vh; overflow-y:auto; box-shadow: 0 0 20px rgba(0,0,0,0.8);">
-    <h2 style="margin-top:0; border-bottom:1px solid #555; padding-bottom:5px;">同盟・国際機関</h2>
+<div id="alliances-modal" class="custom-modal" style="display:none; width:90%; max-width:800px;">
+    <h2>同盟・国際機関</h2>
     <div id="alliances-content"></div>
-    <button onclick="document.getElementById('alliances-modal').style.display='none'" style="margin-top:15px; width:100%;">閉じる</button>
+    <button onclick="document.getElementById('alliances-modal').style.display='none'" style="width:100%;">閉じる</button>
 </div>
 
-<div id="rulebook-modal" style="display:none; position:fixed; top:50%; left:50%; transform:translate(-50%, -50%); background:#222; border:1px solid #444; padding:20px; z-index:1000; width:90%; max-width:600px; max-height:80vh; overflow-y:auto; box-shadow: 0 0 20px rgba(0,0,0,0.8); font-size: 0.9em; line-height: 1.6; box-sizing: border-box;">
-    <h2 style="margin-top:0; border-bottom:1px solid #555; padding-bottom:5px;">ルールブック & システム詳細</h2>
+<div id="rulebook-modal" class="custom-modal" style="display:none; width:90%; max-width:600px; font-size: 0.9em; line-height: 1.6;">
+    <h2>ルールブック & システム詳細</h2>
     
     <h3>基本操作</h3>
     <p>
@@ -78,20 +78,20 @@
         <li><strong>徹底抗戦:</strong> 中央の「枢軸国」vs包囲する「連合国」の最終決戦。</li>
     </ul>
 
-    <button onclick="document.getElementById('rulebook-modal').style.display='none'" style="margin-top:15px; width: 100%;">閉じる</button>
+    <button onclick="document.getElementById('rulebook-modal').style.display='none'" style="width: 100%;">閉じる</button>
 </div>
 
 <div id="container">
     <div id="canvas-container">
         <div id="top-ui-bar">
             <div class="ui-group">
-                <span class="ui-label">年:</span> <span id="top-ui-year" style="font-weight:bold; color:#fff;">1</span>
-                <span class="ui-label" style="margin-left: 10px;">緊張度:</span> <span id="top-ui-tension" style="font-weight:bold; color:#4db8ff;">0.0%</span>
+                <span class="ui-label">年:</span> <span id="top-ui-year">1</span>
+                <span class="ui-label" style="margin-left: 10px;">緊張度:</span> <span id="top-ui-tension">0.0%</span>
             </div>
             <div class="ui-group">
                 <span class="ui-label-speed" style="font-size:0.9em;">速度:</span>
-                <input type="range" id="simSpeed" min="1" max="10" value="5" style="width:100px;">
-                <button id="btn-pause" style="width: auto; padding: 5px 10px; margin-top: 0; margin-left: 5px;">停止/再開</button>
+                <input type="range" id="simSpeed" min="1" max="10" value="5">
+                <button id="btn-pause" style="width: auto; padding: 5px 12px; margin-top: 0; margin-left: 5px;">停止/再開</button>
             </div>
         </div>
         <div id="canvas-wrapper">
@@ -101,33 +101,35 @@
     </div>
     
     <div id="sidebar">
-        <h1>TERL-テリル 世界シュミレーター</h1>
+        <h1 style="font-family: var(--font-sans);"><span style="color: var(--color-primary);">⚡</span> TERL-テリル 世界シミュレーター</h1>
         <input type="file" id="file-input" style="display:none" accept=".terl">
         
         <div id="menu-panel" class="panel">
             <h2>1. マップデザイン</h2>
-            <p>左クリック/タッチ: 描画 (右クリックで消去)</p>
-            <button id="btn-brush" style="margin-bottom:10px;">ブラシ: 陸地</button>
-            <div>
-                サイズ: <select id="mapSize">
+            <p style="font-size: 0.85em; color: var(--text-secondary); margin-bottom: 12px;">左クリック/タッチ: 描画 (右クリックで消去)</p>
+            <button id="btn-brush">ブラシ: 陸地</button>
+            <div style="margin-top: 10px; display: flex; align-items: center; justify-content: space-between;">
+                <span style="font-size: 0.85em; color: var(--text-secondary);">サイズ:</span>
+                <select id="mapSize" style="width: auto; min-width: 120px;">
                     <option value="64">小 (64x64)</option>
                     <option value="128" selected>中 (128x128)</option>
                     <option value="256">大 (256x256)</option>
                 </select>
             </div>
-            <div>
-                シナリオ: <select id="scenarioSelect">
+            <div style="margin-top: 10px; display: flex; align-items: center; justify-content: space-between;">
+                <span style="font-size: 0.85em; color: var(--text-secondary);">シナリオ:</span>
+                <select id="scenarioSelect" style="width: auto; min-width: 120px;">
                     <option value="BLITZKRIEG" selected>電撃戦</option>
                     <option value="QUIET_SPARKS">静かなる火花</option>
                     <option value="GRACEFUL_US">優雅なる合衆国</option>
                     <option value="TOTALLER_KRIEG">徹底抗戦</option>
                 </select>
             </div>
-            <button id="btn-special-alliances-menu" style="margin-bottom:10px; background:#27ae60;">インターナショナルと連合国: オン</button>
-            <button id="btn-fill" style="margin-bottom:10px;">塗りつぶしモード: オフ</button>
+            <button id="btn-special-alliances-menu">インターナショナルと連合国: オン</button>
+            <button id="btn-fill">塗りつぶしモード: オフ</button>
             <button id="btn-generate">世界を生成 (シミュレーション開始)</button>
-            <hr style="border-color:#555; margin:15px 0;">
-            <button id="btn-load-menu" style="background:#e67e22;">📂 ロード (.terl)</button>
+            <hr style="border: 0; border-top: 1px solid var(--border-color); margin:15px 0;">
+            <button id="btn-load-menu">📂 ロード (.terl)</button>
         </div>
 
         <div id="sim-panel" class="panel" style="display:none;">
@@ -136,24 +138,24 @@
             <div class="stat-row"><span>総人口:</span> <span id="info-pop">0</span></div>
             <div class="stat-row"><span>緊張度:</span> <span id="info-tension">0%</span></div>
             <div class="stat-row"><span>覇権国:</span> <span id="info-hegemon" style="font-weight:bold;">なし</span></div>
-            <button id="btn-ranking" style="margin-bottom:10px; background:#6c5ce7; border-color:#8e44ad;">📊 国力ランキング</button>
-            <button id="btn-alliances" style="margin-bottom:10px; background:#2980b9;">🌐 同盟・国際機関</button>
-            <button id="btn-map-mode" style="margin-bottom:10px;">地図モード: 政治</button>
-            <button id="btn-terrain-edit" style="margin-bottom:10px; background:#d35400;">🛠 地形編集: オフ</button>
-            <div id="sim-edit-tools" style="display:none; margin-bottom:10px; padding:10px; background:rgba(0,0,0,0.2); border-radius:4px;">
-                <button id="btn-brush-sim" style="margin-bottom:10px; width:100%;">ブラシ: 陸地</button>
-                <button id="btn-fill-sim" style="margin-bottom:0; width:100%;">塗りつぶしモード: オフ</button>
+            <button id="btn-ranking">📊 国力ランキング</button>
+            <button id="btn-alliances">🌐 同盟・国際機関</button>
+            <button id="btn-map-mode">地図モード: 政治</button>
+            <button id="btn-terrain-edit">🛠 地形編集: オフ</button>
+            <div id="sim-edit-tools" style="display:none; margin-top: 8px; padding:10px; background:rgba(0,0,0,0.2); border-radius:6px; border: 1px solid var(--border-color);">
+                <button id="btn-brush-sim" style="width:100%;">ブラシ: 陸地</button>
+                <button id="btn-fill-sim" style="width:100%; margin-top: 8px;">塗りつぶしモード: オフ</button>
             </div>
-            <button id="btn-special-alliances" style="margin-bottom:10px; background:#27ae60;">インターナショナルと連合国: オン</button>
-            <hr style="border-color:#555; margin:15px 0;">
-            <button id="btn-save" style="margin-bottom:5px; background:#27ae60;">💾 セーブ (.terl)</button>
-            <button id="btn-load-sim" style="background:#e67e22;">📂 ロード (.terl)</button>
+            <button id="btn-special-alliances">インターナショナルと連合国: オン</button>
+            <hr style="border: 0; border-top: 1px solid var(--border-color); margin:15px 0;">
+            <button id="btn-save" style="margin-bottom:5px;">💾 セーブ (.terl)</button>
+            <button id="btn-load-sim">📂 ロード (.terl)</button>
         </div>
 
         <div id="nation-panel" class="panel" style="display:none;">
-            <h2 style="display: flex; align-items: center; justify-content: space-between;">
+            <h2 style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
                 <span id="n-name">国家名</span>
-                <button id="btn-edit-nation" style="font-size: 0.65em; width: auto; padding: 2px 10px; margin: 0; background: #444;">編集</button>
+                <button id="btn-edit-nation" style="font-size: 0.75em; width: auto; padding: 4px 10px; margin: 0; background: rgba(255,255,255,0.05); border-color: var(--border-color);">編集</button>
             </h2>
             <div class="stat-row"><span>指導者:</span> <span id="n-leader"></span></div>
             <div class="stat-row"><span>経済思想:</span> <span id="n-eco"></span></div>
@@ -169,23 +171,23 @@
             <div class="stat-row"><span>安定度:</span> <span id="n-stability"></span></div>
             <div class="stat-row"><span>統治安定度:</span> <span id="n-governance"></span></div>
             
-            <hr style="border-color:#555">
+            <hr style="border: 0; border-top: 1px solid var(--border-color); margin:15px 0;">
             
             <div class="stat-row"><span>国内総生産(GDP):</span> <span id="n-gdp"></span></div>
-            <div class="bar-bg"><div id="bar-gdp" class="bar-fill" style="width:0; background:#f1c40f"></div></div>
+            <div class="bar-bg"><div id="bar-gdp" class="bar-fill" style="width:0; background: linear-gradient(90deg, #f1c40f, #f39c12);"></div></div>
             
             <div class="stat-row"><span>人口:</span> <span id="n-pop"></span></div>
-            <div class="bar-bg"><div id="bar-pop" class="bar-fill" style="width:0; background:#2ecc71"></div></div>
+            <div class="bar-bg"><div id="bar-pop" class="bar-fill" style="width:0; background: linear-gradient(90deg, #2ecc71, #27ae60);"></div></div>
             
             <div class="stat-row"><span>軍事力:</span> <span id="n-mil"></span></div>
-            <div class="bar-bg"><div id="bar-mil" class="bar-fill" style="width:0; background:#e74c3c"></div></div>
+            <div class="bar-bg"><div id="bar-mil" class="bar-fill" style="width:0; background: linear-gradient(90deg, #e74c3c, #c0392b);"></div></div>
 
             <div class="stat-row"><span>工業力:</span> <span id="n-ind"></span></div>
             <div class="stat-row"><span>戦車数:</span> <span id="n-tanks"></span></div>
             <div class="stat-row"><span>海軍力:</span> <span id="n-ships"></span></div>
             <div class="stat-row"><span>軍の質:</span> <span id="n-qual"></span></div>
-            <button id="btn-history" style="margin-top:10px; background:#5d4037;">国家系譜を見る</button>
-            <button id="btn-relations" style="margin-top:5px; background:#2c3e50;">🌍 国際関係</button>
+            <button id="btn-history" style="margin-top:12px;">国家系譜を見る</button>
+            <button id="btn-relations" style="margin-top:8px;">🌍 国際関係</button>
         </div>
 
         <div class="panel">
@@ -193,13 +195,12 @@
             <div id="log"></div>
         </div>
         
-        <button id="btn-rulebook" style="margin-top: auto; background: #2c3e50; border-color: #4a69bd;">📖 ルールブック / システム解説</button>
+        <button id="btn-rulebook" style="margin-top: auto;">📖 ルールブック / システム解説</button>
     </div>
 </div>
 
-
-<div id="edit-nation-modal" style="display:none; position:fixed; top:50%; left:50%; transform:translate(-50%, -50%); background:#222; border:1px solid #444; padding:20px; z-index:1000; width:90%; max-width:400px; max-height:80vh; overflow-y:auto; box-shadow: 0 0 20px rgba(0,0,0,0.8);">
-    <h2 style="margin-top:0; border-bottom:1px solid #555; padding-bottom:5px;">国家編集</h2>
+<div id="edit-nation-modal" class="custom-modal" style="display:none; width:90%; max-width:400px;">
+    <h2>国家編集</h2>
     <div class="edit-form-group">
         <label>基本名 (Base Name)</label>
         <input type="text" id="edit-n-basename">
@@ -228,9 +229,9 @@
         <span id="edit-n-preview-label">プレビュー:</span>
         <span id="edit-n-preview"></span>
     </div>
-    <div style="display:flex; gap:10px;">
-        <button id="btn-edit-save" style="background:#27ae60; flex:1;">保存</button>
-        <button id="btn-edit-cancel" style="background:#c0392b; flex:1;">キャンセル</button>
+    <div style="display:flex; gap:12px; margin-top: 16px;">
+        <button id="btn-edit-save" style="margin-top: 0; background: linear-gradient(135deg, #064e3b, #047857); border-color: #10b981; flex:1;">保存</button>
+        <button id="btn-edit-cancel" style="margin-top: 0; background: linear-gradient(135deg, #7f1d1d, #b91c1c); border-color: #f87171; flex:1;">キャンセル</button>
     </div>
 </div>
 
