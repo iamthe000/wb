@@ -2796,22 +2796,24 @@ function renderTacticalPlans(ctx, offsetX, offsetY) {
     // Clear active labels tracking list for the new frame
     clearActiveTacticalLabels();
 
-    // 1. Render Reinforcement flow lines for all nations at war
-    nations.forEach(n => {
-        if (n.isDead || n.atWarWith.length === 0 || n.cities.length <= 1) return;
-        
-        const capital = n.cities[0];
+    // If no nation is selected, do not render any tactical plans to keep map extremely clear
+    if (selectedNationId === -1) return;
+
+    // 1. Render Reinforcement flow lines for the selected nation only
+    const selectedNation = nations.find(n => n.id === selectedNationId);
+    if (selectedNation && !selectedNation.isDead && selectedNation.atWarWith.length > 0 && selectedNation.cities.length > 1) {
+        const capital = selectedNation.cities[0];
         const cx = offsetX + (capital.tileIdx % width) * TILE_SIZE + TILE_SIZE / 2;
         const cy = offsetY + Math.floor(capital.tileIdx / width) * TILE_SIZE + TILE_SIZE / 2;
         
-        n.cities.slice(1).forEach(city => {
+        selectedNation.cities.slice(1).forEach(city => {
             const rx = offsetX + (city.tileIdx % width) * TILE_SIZE + TILE_SIZE / 2;
             const ry = offsetY + Math.floor(city.tileIdx / width) * TILE_SIZE + TILE_SIZE / 2;
             drawReinforcementLine(ctx, rx, ry, cx, cy, "rgba(255, 183, 0, 0.45)"); // Semi-transparent amber
         });
-    });
+    }
 
-    // 2. Render combat arrows between nations at war
+    // 2. Render combat arrows between nations at war (only if attacker or defender is the selected nation)
     const renderedArrows = new Set();
 
     nations.forEach(attacker => {
@@ -2821,6 +2823,9 @@ function renderTacticalPlans(ctx, offsetX, offsetY) {
             const defender = nations.find(d => d.id === defId);
             if (!defender || defender.isDead) return;
             
+            // Only render if either attacker or defender is the selected nation
+            if (attacker.id !== selectedNationId && defender.id !== selectedNationId) return;
+
             // Generate a unique and stable order key to render once
             const key = `${attacker.id}-${defId}`;
             if (renderedArrows.has(key)) return;
