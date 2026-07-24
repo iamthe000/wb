@@ -2384,17 +2384,65 @@ function spawnNations() {
         
     } else if (activeScenario === 'MEGA_NATIONS') {
         const numNations = Math.max(2, Math.floor(landTiles.length / 250)); 
+        const spawnedSeeds = [];
         
         for(let i=0; i<numNations; i++) {
             if(landTiles.length === 0) break;
-            let rndIdx = Math.floor(Math.random() * landTiles.length);
-            let tileIdx = landTiles[rndIdx];
-            landTiles.splice(rndIdx, 1);
             
-            let y = Math.floor(tileIdx / width);
-            let x = tileIdx % width;
+            // Try to find a land tile that is sufficiently far from other seeds to simulate spaced out major powers
+            let bestTileIdx = -1;
+            let minDistThreshold = 18; // Try spacing of 18 first, then decrease if needed
+            let attempts = 0;
             
-            if(ownerGrid[tileIdx] !== -1) continue;
+            while (attempts < 100) {
+                let rndIdx = Math.floor(Math.random() * landTiles.length);
+                let tileIdx = landTiles[rndIdx];
+                let ty = Math.floor(tileIdx / width);
+                let tx = tileIdx % width;
+                
+                if (ownerGrid[tileIdx] !== -1) {
+                    attempts++;
+                    continue;
+                }
+                
+                // Check distance to all other spawned seeds
+                let tooClose = false;
+                for (let seed of spawnedSeeds) {
+                    let dist = Math.sqrt((tx - seed.x)**2 + (ty - seed.y)**2);
+                    if (dist < minDistThreshold) {
+                        tooClose = true;
+                        break;
+                    }
+                }
+                
+                if (!tooClose) {
+                    bestTileIdx = tileIdx;
+                    break;
+                }
+                
+                attempts++;
+                if (attempts % 20 === 0 && minDistThreshold > 4) {
+                    minDistThreshold -= 4; // Relax distance threshold
+                }
+            }
+            
+            // Fallback if no tile found with spacing constraints
+            if (bestTileIdx === -1) {
+                let unowned = landTiles.filter(t => ownerGrid[t] === -1);
+                if (unowned.length === 0) break;
+                bestTileIdx = unowned[Math.floor(Math.random() * unowned.length)];
+            }
+            
+            // Remove the selected tile from landTiles
+            let idxInList = landTiles.indexOf(bestTileIdx);
+            if (idxInList !== -1) {
+                landTiles.splice(idxInList, 1);
+            }
+            
+            let y = Math.floor(bestTileIdx / width);
+            let x = bestTileIdx % width;
+            
+            spawnedSeeds.push({ x, y });
             
             let n = new Nation(undefined, x, y);
             // Boost stats for MEGA_NATIONS
@@ -2454,7 +2502,96 @@ function spawnNations() {
 }
 
 function expandTerritoryInitial() {
-    // 簡易的に各国の周囲を埋める (最適化されたFlood fill)
+    if (activeScenario === 'MEGA_NATIONS') {
+        // Multi-source Dijkstra/BFS partition for clean, smooth Voronoi borders aligned with geographical features
+        let dist = new Array(width * height).fill(Infinity);
+        let parentNation = new Array(width * height).fill(-1);
+        
+        let maxDistPossible = 4 * width * height;
+        let buckets = Array.from({ length: maxDistPossible }, () => []);
+        let currentMinBucket = 0;
+        let elementsInBuckets = 0;
+        
+        function pushToBucket(tileIdx, d, ownerId) {
+            if (d < dist[tileIdx]) {
+                dist[tileIdx] = d;
+                parentNation[tileIdx] = ownerId;
+                if (d < buckets.length) {
+                    buckets[d].push({ tileIdx, ownerId });
+                    elementsInBuckets++;
+                }
+            }
+        }
+        
+        // Initialize sources
+        nations.forEach(n => {
+            n.tiles.forEach(tIdx => {
+                dist[tIdx] = 0;
+                parentNation[tIdx] = n.id;
+                buckets[0].push({ tileIdx: tIdx, ownerId: n.id });
+                elementsInBuckets++;
+            });
+        });
+        
+        while (elementsInBuckets > 0) {
+            while (currentMinBucket < buckets.length && buckets[currentMinBucket].length === 0) {
+                currentMinBucket++;
+            }
+            if (currentMinBucket >= buckets.length) break;
+            
+            let { tileIdx, ownerId } = buckets[currentMinBucket].pop();
+            elementsInBuckets--;
+            
+            if (currentMinBucket > dist[tileIdx]) continue;
+            
+            let cx = tileIdx % width;
+            let cy = Math.floor(tileIdx / width);
+            
+            let neighbors = [
+                [cx+1, cy], [cx-1, cy], [cx, cy+1], [cx, cy-1]
+            ];
+            
+            for (let [nx, ny] of neighbors) {
+                if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
+                    let nIdx = ny * width + nx;
+                    
+                    if (grid[nIdx] === 0) continue; // Skip water
+                    
+                    // Higher movement cost on rough terrain makes borders align with natural barriers (mountains/rivers)
+                    let moveCost = 1;
+                    if (grid[nIdx] === 2) { // Mountain
+                        moveCost = 4;
+                    } else if (grid[nIdx] === 4) { // Major River
+                        moveCost = 3;
+                    } else if (grid[nIdx] === 3) { // River
+                        moveCost = 2;
+                    }
+                    
+                    let nextDist = currentMinBucket + moveCost;
+                    if (nextDist < dist[nIdx]) {
+                        pushToBucket(nIdx, nextDist, ownerId);
+                    }
+                }
+            }
+        }
+        
+        // Rebuild each nation's tiles list based on parentNation assignments
+        nations.forEach(n => {
+            n.tiles = [];
+        });
+        
+        for (let i = 0; i < width * height; i++) {
+            if (parentNation[i] !== -1) {
+                ownerGrid[i] = parentNation[i];
+                nations[parentNation[i]].tiles.push(i);
+            }
+        }
+        
+        nations.forEach(n => n.updateCentroid());
+        return;
+    }
+
+    // Default 簡易的に各国の周囲を埋める (最適化されたFlood fill)
     let changed = true;
     let loopCount = 0;
 
