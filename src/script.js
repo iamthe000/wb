@@ -5171,7 +5171,7 @@ function simulateTick() {
         }
         // 和平判定
         else if (n.atWarWith.includes(target.id)) {
-            let peaceChance = 0.005; // 基礎和平確率
+            let peaceChance = (activeScenario === 'MEGA_NATIONS') ? 0.03 : 0.005; // 基礎和平確率 (大規模国家モードでは講和しやすくする)
             if (n.relations[target.id] > -20) peaceChance += 0.02;
             
             // 地形による和平確率の上昇 (山や川が境界だと膠着しやすい)
@@ -5190,26 +5190,55 @@ function simulateTick() {
                 const tPow = target.getMilitaryPower();
                 const ratio = nPow / tPow;
 
-                if (ratio > 5 || ratio < 0.2) {
-                    // 一方が圧倒的
-                    const loser = ratio > 5 ? target : n;
-                    if (loser.stability < 40 || loser.cities.length <= 2) {
-                        concludePeace(n, target, 'PUPPET');
+                if (activeScenario === 'MEGA_NATIONS') {
+                    // 大規模国家モードでは、お互い最後まで殲滅しあう絶滅戦争を少なくし、一部割譲や一部の傀儡化などで終戦しやすくする
+                    const loser = ratio > 1 ? target : n;
+                    const rMax = Math.max(ratio, 1 / ratio);
+                    
+                    if (rMax > 3.0) {
+                        // 圧倒的/優勢な場合、傀儡化(PUPPET)か一部割譲(PARTIAL_PEACE)
+                        if (Math.random() < 0.5 && loser.cities.length >= 2) {
+                            concludePeace(n, target, 'PUPPET');
+                        } else {
+                            concludePeace(n, target, 'PARTIAL_PEACE');
+                        }
+                    } else if (rMax > 1.5) {
+                        // やや優勢な場合、一部割譲(PARTIAL_PEACE)か国境割譲(ANNEX_BORDER)
+                        if (Math.random() < 0.6) {
+                            concludePeace(n, target, 'PARTIAL_PEACE');
+                        } else {
+                            concludePeace(n, target, 'ANNEX_BORDER');
+                        }
                     } else {
-                        concludePeace(n, target, 'PARTIAL_PEACE');
+                        // 膠着
+                        if (Math.random() < 0.5) {
+                            concludePeace(n, target, 'WHITE_PEACE');
+                        } else {
+                            concludePeace(n, target, 'PARTIAL_PEACE');
+                        }
                     }
-                } else if (ratio > 2.5 || ratio < 0.4) {
-                    // 優勢 -> 国境割譲 または 都市割譲
-                    if (Math.random() < 0.6) {
-                        concludePeace(n, target, 'ANNEX_BORDER');
-                    } else {
-                        concludePeace(n, target, 'PARTIAL_PEACE');
-                    }
-                } else if (roughTerrainRatio > 0.6) {
-                    // 地形による膠着
-                    concludePeace(n, target, 'WHITE_PEACE');
                 } else {
-                    concludePeace(n, target, 'DEFAULT');
+                    if (ratio > 5 || ratio < 0.2) {
+                        // 一方が圧倒的
+                        const loser = ratio > 5 ? target : n;
+                        if (loser.stability < 40 || loser.cities.length <= 2) {
+                            concludePeace(n, target, 'PUPPET');
+                        } else {
+                            concludePeace(n, target, 'PARTIAL_PEACE');
+                        }
+                    } else if (ratio > 2.5 || ratio < 0.4) {
+                        // 優勢 -> 国境割譲 または 都市割譲
+                        if (Math.random() < 0.6) {
+                            concludePeace(n, target, 'ANNEX_BORDER');
+                        } else {
+                            concludePeace(n, target, 'PARTIAL_PEACE');
+                        }
+                    } else if (roughTerrainRatio > 0.6) {
+                        // 地形による膠着
+                        concludePeace(n, target, 'WHITE_PEACE');
+                    } else {
+                        concludePeace(n, target, 'DEFAULT');
+                    }
                 }
             }
         }
