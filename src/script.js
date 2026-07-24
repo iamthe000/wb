@@ -223,6 +223,51 @@ function isCityNameTaken(name) {
     return false;
 }
 
+/**
+ * 海を越えて未開拓地（ownerGrid == -1）を探索する (BFS)
+ */
+function findUnclaimedLandAcrossSea(startIdx, maxDist) {
+    const queue = [{ idx: startIdx, dist: 0 }];
+    const visited = new Set();
+    visited.add(startIdx);
+
+    while (queue.length > 0) {
+        const { idx, dist } = queue.shift();
+        if (dist >= maxDist) continue;
+
+        const cx = idx % width;
+        const cy = Math.floor(idx / width);
+
+        const neighbors = [[0,1],[0,-1],[1,0],[-1,0]];
+        for (const [dx, dy] of neighbors) {
+            const nx = cx + dx;
+            const ny = cy + dy;
+            if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
+                const nIdx = ny * width + nx;
+                if (visited.has(nIdx)) continue;
+                visited.add(nIdx);
+
+                const tileType = grid[nIdx];
+                const owner = ownerGrid[nIdx];
+
+                if (tileType === 0) {
+                    // 水（海）タイルの場合は航行を継続
+                    queue.push({ idx: nIdx, dist: dist + 1 });
+                } else if (tileType === 1 || tileType === 2) {
+                    // 陸地または山岳
+                    if (owner === -1) {
+                        // 未所属の土地。海を渡ってきたことを保証するため dist >= 1 をチェック
+                        if (dist >= 1) {
+                            return nIdx;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    return -1;
+}
+
 function updateContinents() {
     continentMap = new Array(width * height).fill(-1);
     let currentContinentId = 0;
@@ -4662,6 +4707,20 @@ function simulateTick() {
                         }
                     }
                 }
+
+                // 陸上での拡大ができなかった場合、海を越えた未開拓地への植民（海軍力がある程度必要）
+                if (!done && n.ships >= 5) {
+                    const maxDist = Math.min(10, 3 + Math.floor(n.ships / 3));
+                    const seaIdx = findUnclaimedLandAcrossSea(tIdx, maxDist);
+                    if (seaIdx !== -1) {
+                        ownerGrid[seaIdx] = n.id;
+                        n.tiles.push(seaIdx);
+                        n.gdp = Math.max(0, n.gdp - 10); // 海を越えるための追加コスト
+                        log(`入植: ${n.name}は海軍力（船数: ${n.ships}）を活かして、海を越えた未開拓地に入植しました。`, "log-info");
+                        done = true;
+                    }
+                }
+
                 if(done) break;
             }
         }
@@ -5086,6 +5145,18 @@ function simulateTick() {
 
         n.relations[target.id] = clamp(n.relations[target.id] + change, -100, 100);
 
+        // 傀儡国と宗主国の関係は常に100に固定/維持
+        if ((n.isPuppet && n.masterId === target.id) || (target.isPuppet && target.masterId === n.id)) {
+            n.relations[target.id] = 100;
+            target.relations[n.id] = 100;
+            return;
+        }
+        // 傀儡国同士の関係も良好に保つ
+        if (n.isPuppet && target.isPuppet && n.masterId === target.masterId && n.masterId !== -1) {
+            n.relations[target.id] = Math.max(50, n.relations[target.id]);
+            target.relations[n.id] = Math.max(50, target.relations[n.id]);
+        }
+
         // 戦争判定 (閾値を下げ、好戦的に)
         // 隣接しているか、あるいは海軍力があり両者が沿岸国であれば宣戦布告可能
         const canNavalInvade = (n.tech >= 3 && n.ships >= 20 && n.isCoastal() && target.isCoastal());
@@ -5131,6 +5202,8 @@ function simulateTick() {
                 if (n.isPuppet && n.masterId === target.id) return;
                 // 主人は傀儡国を攻撃しない
                 if (target.isPuppet && target.masterId === n.id) return;
+                // 傀儡国同士は戦わない
+                if (n.isPuppet && target.isPuppet && n.masterId === target.masterId && n.masterId !== -1) return;
                 // 同盟国には攻撃しない (関係が極悪でない限り)
                 if (n.allies.includes(target.id) && n.relations[target.id] > -50) return;
 
@@ -5162,6 +5235,8 @@ function simulateTick() {
                 if (n.isPuppet && n.masterId === target.id) return;
                 // 主人は傀儡国を攻撃しない
                 if (target.isPuppet && target.masterId === n.id) return;
+                // 傀儡国同士は戦わない
+                if (n.isPuppet && target.isPuppet && n.masterId === target.masterId && n.masterId !== -1) return;
                 // 同盟国には攻撃しない
                 if (n.allies.includes(target.id)) return;
 
@@ -5245,6 +5320,21 @@ function simulateTick() {
     });
 
     // 3. 戦争フェーズ
+    // 宗主国と傀儡国、および傀儡国同士の間の不正な交戦状態をクリーンアップ
+    nations.forEach(n => {
+        if (n.isDead) return;
+        n.atWarWith = n.atWarWith.filter(enemyId => {
+            const enemy = nations.find(e => e.id === enemyId);
+            if (!enemy || enemy.isDead) return false;
+            if ((n.isPuppet && n.masterId === enemy.id) || (enemy.isPuppet && enemy.masterId === n.id) || (n.isPuppet && enemy.isPuppet && n.masterId === enemy.masterId && n.masterId !== -1)) {
+                // 相手側のリストからも自分を除去
+                enemy.atWarWith = enemy.atWarWith.filter(id => id !== n.id);
+                return false;
+            }
+            return true;
+        });
+    });
+
     nations.forEach(attacker => {
         if (attacker.isDead) return;
         
@@ -5481,6 +5571,13 @@ function getBoundaryComposition(n1, n2) {
 }
 
 function declareWar(n1, n2) {
+    if (n1.id === n2.id) return;
+    if (n1.isDead || n2.isDead) return;
+
+    // 宗主国と傀儡国、および傀儡国同士は絶対に戦わない
+    if ((n1.isPuppet && n1.masterId === n2.id) || (n2.isPuppet && n2.masterId === n1.id)) return;
+    if (n1.isPuppet && n2.isPuppet && n1.masterId === n2.masterId && n1.masterId !== -1) return;
+
     if(n1.atWarWith.includes(n2.id)) return;
     n1.atWarWith.push(n2.id);
     if(!n2.atWarWith.includes(n1.id)) n2.atWarWith.push(n1.id);
@@ -5493,9 +5590,12 @@ function declareWar(n1, n2) {
     if (n2.isPuppet && n2.masterId !== -1) {
         const master = nations.find(m => m.id === n2.masterId);
         if (master && !master.isDead && master.id !== n1.id) {
-            if (!master.atWarWith.includes(n1.id)) {
-                 log(`${n2.name}の宗主国である${master.name}が保護義務を履行し、参戦しました。`, "log-war");
-                 declareWar(master, n1);
+            // 攻撃側（n1）が宗主国自身、または別の傀儡国（同じ宗主国）でない場合のみ、宗主国が防衛参戦
+            if (n1.id !== master.id && !(n1.isPuppet && n1.masterId === master.id)) {
+                if (!master.atWarWith.includes(n1.id)) {
+                     log(`${n2.name}の宗主国である${master.name}が保護義務を履行し、参戦しました。`, "log-war");
+                     declareWar(master, n1);
+                }
             }
         }
     }
@@ -5503,17 +5603,23 @@ function declareWar(n1, n2) {
     // 傀儡国も参戦
     nations.forEach(puppet => {
         if (puppet.isPuppet && puppet.masterId === n1.id && !puppet.isDead) {
-            if (!puppet.atWarWith.includes(n2.id)) {
-                puppet.atWarWith.push(n2.id);
-                if (!n2.atWarWith.includes(puppet.id)) n2.atWarWith.push(puppet.id);
-                log(`${n1.name}の傀儡国、${puppet.name}が参戦しました。`, "log-war");
+            // 敵国（n2）が傀儡国自身の宗主国、または同じ宗主国を持つ傀儡国でない場合のみ参戦
+            if (n2.id !== puppet.masterId && !(n2.isPuppet && n2.masterId === puppet.masterId)) {
+                if (!puppet.atWarWith.includes(n2.id)) {
+                    puppet.atWarWith.push(n2.id);
+                    if (!n2.atWarWith.includes(puppet.id)) n2.atWarWith.push(puppet.id);
+                    log(`${n1.name}の傀儡国、${puppet.name}が参戦しました。`, "log-war");
+                }
             }
         }
         if (puppet.isPuppet && puppet.masterId === n2.id && !puppet.isDead) {
-            if (!puppet.atWarWith.includes(n1.id)) {
-                puppet.atWarWith.push(n1.id);
-                if (!n1.atWarWith.includes(puppet.id)) n1.atWarWith.push(puppet.id);
-                log(`${n2.name}の傀儡国、${puppet.name}が参戦しました。`, "log-war");
+            // 敵国（n1）が傀儡国自身の宗主国、または同じ宗主国を持つ傀儡国でない場合のみ参戦
+            if (n1.id !== puppet.masterId && !(n1.isPuppet && n1.masterId === puppet.masterId)) {
+                if (!puppet.atWarWith.includes(n1.id)) {
+                    puppet.atWarWith.push(n1.id);
+                    if (!n1.atWarWith.includes(puppet.id)) n1.atWarWith.push(puppet.id);
+                    log(`${n2.name}の傀儡国、${puppet.name}が参戦しました。`, "log-war");
+                }
             }
         }
     });
@@ -5523,6 +5629,10 @@ function declareWar(n1, n2) {
     n2.allies.forEach(allyId => {
         const ally = nations.find(a => a.id === allyId);
         if (ally && !ally.isDead && !ally.atWarWith.includes(n1.id) && ally.id !== n1.id) {
+            // 同盟国（ally）と攻撃側（n1）が宗主国・傀儡国の関係にある場合は介入しない
+            if ((ally.isPuppet && ally.masterId === n1.id) || (n1.isPuppet && n1.masterId === ally.id)) return;
+            if (ally.isPuppet && n1.isPuppet && ally.masterId === n1.masterId && ally.masterId !== -1) return;
+
             // 確率で参戦 (高い確率)
             if (Math.random() < 0.9) {
                 let reason = `${n2.name}との同盟に基づき`;
