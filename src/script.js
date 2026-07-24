@@ -2454,43 +2454,66 @@ function spawnNations() {
 }
 
 function expandTerritoryInitial() {
-    // 簡易的に各国の周囲を埋める
+    // 簡易的に各国の周囲を埋める (最適化されたFlood fill)
     let changed = true;
     let loopCount = 0;
-    while(changed && loopCount < 20) {
+
+    // 未所有の陸地タイルのみを収集
+    let landIndices = [];
+    for (let i = 0; i < width * height; i++) {
+        if (grid[i] !== 0 && ownerGrid[i] === -1) {
+            landIndices.push(i);
+        }
+    }
+
+    // Fisher-Yates シャッフルで処理順序をランダム化 (方向のバイアスを排除)
+    for (let i = landIndices.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        const temp = landIndices[i];
+        landIndices[i] = landIndices[j];
+        landIndices[j] = temp;
+    }
+
+    // 大規模国家モードではより広い範囲を確実に埋めるためループ上限を200、その他は100に設定
+    const maxLoops = (activeScenario === 'MEGA_NATIONS') ? 200 : 100;
+
+    while (changed && loopCount < maxLoops) {
         changed = false;
         let newOwners = [...ownerGrid];
-        
-        // ランダムな順序で処理するためにシャッフル
-        let indices = Array.from({length: width*height}, (_, i) => i);
-        indices.sort(() => Math.random() - 0.5);
+        let nextLandIndices = [];
 
-        for(let i of indices) {
-            if(grid[i] === 0) continue; // 海は無視
-            if(ownerGrid[i] !== -1) continue; // 所有者あり
+        for (let i of landIndices) {
+            if (ownerGrid[i] !== -1) continue; // 他の処理ですでに所有者が決まった場合はスキップ
 
             // 隣接タイルをチェック
             let neighbors = [];
             let cx = i % width;
             let cy = Math.floor(i / width);
-            
+
             [[0,1],[0,-1],[1,0],[-1,0]].forEach(([dx, dy]) => {
-                let nx=cx+dx, ny=cy+dy;
-                if(nx>=0 && nx<width && ny>=0 && ny<height) {
-                    let nIdx = ny*width+nx;
-                    if(ownerGrid[nIdx] !== -1) neighbors.push(ownerGrid[nIdx]);
+                let nx = cx + dx;
+                let ny = cy + dy;
+                if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
+                    let nIdx = ny * width + nx;
+                    if (ownerGrid[nIdx] !== -1) {
+                        neighbors.push(ownerGrid[nIdx]);
+                    }
                 }
             });
 
-            if(neighbors.length > 0) {
-                // 最も多い隣国に吸収される確率が高い
-                let chosen = neighbors[Math.floor(Math.random()*neighbors.length)];
+            if (neighbors.length > 0) {
+                // 隣接国の中からランダムに選択（元のロジックを維持）
+                let chosen = neighbors[Math.floor(Math.random() * neighbors.length)];
                 newOwners[i] = chosen;
                 nations[chosen].tiles.push(i);
                 changed = true;
+            } else {
+                // まだ隣接国がない場合は次のループに回す
+                nextLandIndices.push(i);
             }
         }
         ownerGrid = newOwners;
+        landIndices = nextLandIndices;
         loopCount++;
     }
 
