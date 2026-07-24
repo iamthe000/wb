@@ -1387,8 +1387,8 @@ function generateWorld() {
     document.getElementById('sim-panel').style.display = 'block';
 
     activeScenario = currentScenario;
-    isDemocracyAwakened = (activeScenario === 'TOTALLER_KRIEG' || activeScenario === 'GRACEFUL_US');
-    isSocialismSprouted = (activeScenario === 'TOTALLER_KRIEG' || activeScenario === 'GRACEFUL_US');
+    isDemocracyAwakened = (activeScenario === 'TOTALLER_KRIEG' || activeScenario === 'GRACEFUL_US' || activeScenario === 'MEGA_NATIONS');
+    isSocialismSprouted = (activeScenario === 'TOTALLER_KRIEG' || activeScenario === 'GRACEFUL_US' || activeScenario === 'MEGA_NATIONS');
 
     // 1. 地形補正 (山と川)
     generateTerrainFeatures();
@@ -2337,6 +2337,52 @@ function spawnNations() {
         us.updateCentroid();
         nations.push(us);
         
+    } else if (activeScenario === 'MEGA_NATIONS') {
+        const numNations = Math.max(2, Math.floor(landTiles.length / 250)); 
+        
+        for(let i=0; i<numNations; i++) {
+            if(landTiles.length === 0) break;
+            let rndIdx = Math.floor(Math.random() * landTiles.length);
+            let tileIdx = landTiles[rndIdx];
+            landTiles.splice(rndIdx, 1);
+            
+            let y = Math.floor(tileIdx / width);
+            let x = tileIdx % width;
+            
+            if(ownerGrid[tileIdx] !== -1) continue;
+            
+            let n = new Nation(undefined, x, y);
+            // Boost stats for MEGA_NATIONS
+            n.tech = Math.floor(Math.random() * 2) + 2; // Tech 2 (Industrial) or 3 (Modern)
+            n.pop = Math.floor(n.pop * 5.0);
+            n.gdp = Math.floor(n.gdp * 8.0);
+            n.soldiers = Math.floor(n.pop * 0.15);
+            n.soldierQuality += 1.5;
+            n.equipQuality += 1.5;
+            n.tanks = 80 + Math.floor(Math.random() * 150);
+            n.ships = 40 + Math.floor(Math.random() * 80);
+            n.stability = 100;
+            n.governance = 80;
+            n.updateName();
+            nations.push(n);
+        }
+        
+        expandTerritoryInitial();
+
+        // Generate multiple cities for these massive nations
+        nations.forEach(n => {
+            if (n.tiles.length === 0) return;
+            const numExtraCities = Math.min(6, Math.max(2, Math.floor(n.tiles.length / 100)));
+            for (let k = 0; k < numExtraCities; k++) {
+                const t = n.tiles[Math.floor(Math.random() * n.tiles.length)];
+                const tooClose = n.cities.some(c => getDistSq(c.tileIdx, t) < 64);
+                if (!tooClose) {
+                    const cityName = n.generateCityName();
+                    n.cities.push(new City(cityName, t, n.id));
+                }
+            }
+        });
+
     } else {
         // Default Spawning Logic
         const numNations = Math.max(2, Math.floor(landTiles.length / 50)); 
@@ -5613,10 +5659,10 @@ function concludePeace(n1, n2, type) {
         }
 
     } else if (type === 'PUPPET') {
-        // 傀儡化時に領土の2/3を宗主国が吸収するが、綺麗な国境にするために
-        // 敗戦国の首都を中心に約1/3の領土を残し、残りを割譲させる (BFS)
+        // 傀儡化時に領土の2/3（通常）または1/2（大規模モード）を宗主国が吸収するが、綺麗な国境にするために
+        // 敗戦国の首都を中心に残し、残りを割譲させる (BFS)
         const totalTiles = loser.tiles.length;
-        const targetKeep = Math.ceil(totalTiles / 3);
+        const targetKeep = (activeScenario === 'MEGA_NATIONS') ? Math.ceil(totalTiles / 2) : Math.ceil(totalTiles / 3);
         
         // 首都または最初のタイルを起点にする
         let startTile = -1;
@@ -5678,27 +5724,181 @@ function concludePeace(n1, n2, type) {
             }
         }
 
-        loser.isPuppet = true;
-        loser.masterId = winner.id;
-        loser.puppetSince = year;
-        loser.updateName();
-        loser.stability = 50;
-        winner.relations[loser.id] = 100;
-        loser.relations[winner.id] = 100;
+        // 大規模国家モードの場合、複数の傀儡国家を樹立する
+        if (activeScenario === 'MEGA_NATIONS' && loser.cities.length >= 2) {
+            // keepSetの中の都市をリスト化
+            const keepCities = [...loser.cities];
+            
+            // 最大3つの傀儡国に分割（元のloser rump + 1〜2つの新傀儡国）
+            const maxPuppets = Math.min(3, keepCities.length);
+            
+            if (maxPuppets >= 2) {
+                // 各傀儡国の中心となる都市
+                const puppetCenters = [];
+                for (let k = 0; k < maxPuppets; k++) {
+                    puppetCenters.push(keepCities[k]);
+                }
+
+                // マルチソースBFSによる領域分割
+                const queue = [];
+                const assignedPuppet = {}; // tileIdx -> puppetIdx
+                
+                puppetCenters.forEach((city, idx) => {
+                    queue.push({ tileIdx: city.tileIdx, puppetIdx: idx });
+                    assignedPuppet[city.tileIdx] = idx;
+                });
+
+                let head = 0;
+                while (head < queue.length) {
+                    const { tileIdx, puppetIdx } = queue[head++];
+                    const cx = tileIdx % width;
+                    const cy = Math.floor(tileIdx / width);
+
+                    const neighbors = [
+                        [cx+1, cy], [cx-1, cy], [cx, cy+1], [cx, cy-1]
+                    ];
+
+                    for (const [nx, ny] of neighbors) {
+                        if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
+                            const nIdx = ny * width + nx;
+                            // keepSet（敗者領土内）かつ未割り当てのタイル
+                            if (keepSet.has(nIdx) && assignedPuppet[nIdx] === undefined) {
+                                assignedPuppet[nIdx] = puppetIdx;
+                                queue.push({ tileIdx: nIdx, puppetIdx });
+                            }
+                        }
+                    }
+                }
+
+                // 割り当てから漏れたタイルはpuppet 0（元のloser）に
+                keepSet.forEach(tIdx => {
+                    if (assignedPuppet[tIdx] === undefined) {
+                        assignedPuppet[tIdx] = 0;
+                    }
+                });
+
+                // 各puppetにタイルを振り分け
+                const puppetTiles = Array.from({ length: maxPuppets }, () => []);
+                keepSet.forEach(tIdx => {
+                    const idx = assignedPuppet[tIdx];
+                    puppetTiles[idx].push(tIdx);
+                });
+
+                // puppet 0（元のloser）の更新
+                loser.tiles = puppetTiles[0];
+                loser.isPuppet = true;
+                loser.masterId = winner.id;
+                loser.puppetSince = year;
+                loser.updateName();
+                loser.stability = 50;
+                winner.relations[loser.id] = 100;
+                loser.relations[winner.id] = 100;
+
+                // 都市の再配置（puppet 0の都市以外を新しい傀儡国へ）
+                const citiesByPuppet = Array.from({ length: maxPuppets }, () => []);
+                loser.cities.forEach(city => {
+                    const idx = assignedPuppet[city.tileIdx];
+                    if (idx !== undefined) {
+                        citiesByPuppet[idx].push(city);
+                    } else {
+                        citiesByPuppet[0].push(city);
+                    }
+                });
+                loser.cities = citiesByPuppet[0];
+
+                // 新しい傀儡国の生成 (idx >= 1)
+                for (let idx = 1; idx < maxPuppets; idx++) {
+                    const newPuppet = new Nation();
+                    
+                    // 中心の都市名をもとに基本名を決定
+                    const capCity = puppetCenters[idx];
+                    newPuppet.baseName = capCity.name.replace(/府|市|領|国|共和国|王国|帝国/g, "");
+                    if (!newPuppet.baseName) {
+                        newPuppet.baseName = loser.baseName + "臨時";
+                    }
+                    
+                    let newH = Math.floor(Math.random() * 360);
+                    if (winner.color.startsWith('hsl')) {
+                        const m = winner.color.match(/\d+/);
+                        if (m) {
+                            newH = (parseInt(m[0]) + idx * 40) % 360;
+                        }
+                    }
+                    newPuppet.color = `hsl(${newH}, 75%, 55%)`;
+                    newPuppet.tech = loser.tech;
+                    
+                    // 統計情報の配分
+                    const ratio = puppetTiles[idx].length / keepSet.size;
+                    newPuppet.pop = Math.max(1000, Math.floor(loser.pop * ratio));
+                    newPuppet.gdp = Math.max(100, Math.floor(loser.gdp * ratio));
+                    newPuppet.soldiers = Math.floor(newPuppet.pop * 0.1);
+                    
+                    newPuppet.isPuppet = true;
+                    newPuppet.masterId = winner.id;
+                    newPuppet.puppetSince = year;
+                    newPuppet.stability = 70;
+                    
+                    // タイルと都市の割り当て
+                    newPuppet.tiles = puppetTiles[idx];
+                    puppetTiles[idx].forEach(tIdx => {
+                        ownerGrid[tIdx] = newPuppet.id;
+                    });
+                    newPuppet.cities = citiesByPuppet[idx];
+                    newPuppet.cities.forEach(c => {
+                        c.nationId = newPuppet.id;
+                    });
+
+                    newPuppet.updateName();
+                    
+                    winner.relations[newPuppet.id] = 100;
+                    newPuppet.relations[winner.id] = 100;
+                    newPuppet.updateCentroid();
+
+                    nations.push(newPuppet);
+                    
+                    newPuppet.addHistory(`建国: ${winner.name}の傀儡国として独立`);
+                    log(`分割傀儡化: 新たな傀儡国「${newPuppet.name}」が${winner.name}の保護下で建国されました。`, "log-war");
+                }
+
+                log(`戦後処理: ${loser.name}は分割され、複数の傀儡国家となりました。`, "log-war");
+                winner.addHistory(`講和(大規模勝利): ${loser.name}を分割傀儡化`);
+                loser.addHistory(`講和(敗北): 分割され傀儡国となる`);
+
+            } else {
+                // 1都市しかない場合は通常の単一傀儡化
+                loser.isPuppet = true;
+                loser.masterId = winner.id;
+                loser.puppetSince = year;
+                loser.updateName();
+                loser.stability = 50;
+                winner.relations[loser.id] = 100;
+                loser.relations[winner.id] = 100;
+                log(`戦後処理: ${loser.name}は${winner.name}の傀儡国となりました。`, "log-war");
+                winner.addHistory(`講和(完全勝利): ${loser.name}を傀儡化`);
+                loser.addHistory(`講和(完全敗北): ${winner.name}の傀儡となる`);
+            }
+        } else {
+            // 通常モードまたは都市数が不足している場合
+            loser.isPuppet = true;
+            loser.masterId = winner.id;
+            loser.puppetSince = year;
+            loser.updateName();
+            loser.stability = 50;
+            winner.relations[loser.id] = 100;
+            loser.relations[winner.id] = 100;
+            log(`戦後処理: ${loser.name}は${winner.name}の傀儡国となりました。`, "log-war");
+            winner.addHistory(`講和(完全勝利): ${loser.name}を傀儡化`);
+            loser.addHistory(`講和(完全敗北): ${winner.name}の傀儡となる`);
+        }
         
         // 敗戦国の傀儡国を戦勝国へ委譲
         nations.forEach(vassal => {
             if (vassal.isPuppet && vassal.masterId === loser.id && !vassal.isDead) {
                 vassal.masterId = winner.id;
-                // 名前更新は不要かもしれないが、念のため
                 vassal.updateName();
                 log(`戦勝国による処分: ${vassal.name}の宗主権が${winner.name}に移譲されました。`, "log-war");
             }
         });
-
-        log(`戦後処理: ${loser.name}は${winner.name}の傀儡国となりました。`, "log-war");
-        winner.addHistory(`講和(完全勝利): ${loser.name}を傀儡化`);
-        loser.addHistory(`講和(完全敗北): ${winner.name}の傀儡となる`);
     } else {
         log(`和平: ${n1.name}と${n2.name}が停戦合意しました。`, "log-peace");
     }
