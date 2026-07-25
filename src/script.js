@@ -191,6 +191,35 @@ let allianceIdCounter = 0;
 let organizations = [];
 let orgIdCounter = 0;
 
+let concertDuration = 0;
+let concertMembers = []; // List of great power nation IDs in the concert
+
+function getGreatPowers() {
+    // Sort active, independent, non-puppet nations by their total power score.
+    const candidates = nations.filter(n => !n.isDead && !n.isPuppet);
+    const scored = candidates.map(n => {
+        let totalGdp = n.gdp;
+        let totalPop = n.pop;
+        let totalMil = n.getMilitaryPower();
+        let totalTiles = n.tiles.length;
+        
+        nations.forEach(p => {
+            if (p.isPuppet && p.masterId === n.id && !p.isDead) {
+                totalGdp += p.gdp;
+                totalPop += p.pop;
+                totalMil += p.getMilitaryPower();
+                totalTiles += p.tiles.length;
+            }
+        });
+        
+        const score = totalGdp + (totalPop / 100) + (totalMil * 10) + (totalTiles * 50);
+        return { nation: n, score: score };
+    });
+    
+    scored.sort((a, b) => b.score - a.score);
+    return scored.slice(0, 3).map(item => item.nation);
+}
+
 // ズーム・パン用
 let zoomLevel = 1.0;
 let panX = 0;
@@ -2705,6 +2734,18 @@ function updateGame() {
                 hEl.style.color = "#ccc";
             }
 
+            // Concert of Powers Update
+            const cEl = document.getElementById('info-concert');
+            if (cEl) {
+                if (concertDuration > 0) {
+                    cEl.innerText = `発足中 (残り ${concertDuration}年)`;
+                    cEl.style.color = "#00ffff";
+                } else {
+                    cEl.innerText = "非発足";
+                    cEl.style.color = "#ccc";
+                }
+            }
+
             // Real-time Ranking Update
             if (document.getElementById('ranking-modal').style.display === 'block') {
                 renderRankingContent();
@@ -4759,6 +4800,93 @@ function simulateTick() {
     // 緊張感の自然減衰
     worldTension = Math.max(0, worldTension - 0.2);
 
+    // === 大国協調体制（ウィーン体制）の処理 ===
+    if (concertDuration > 0) {
+        concertDuration--;
+        
+        // 崩壊条件のチェック
+        let shouldCollapse = false;
+        let collapseReason = "";
+        
+        for (let mId of concertMembers) {
+            const m = nations.find(n => n.id === mId);
+            if (!m || m.isDead || m.isPuppet) {
+                shouldCollapse = true;
+                collapseReason = "メンバー国の滅亡または傀儡化";
+                break;
+            }
+            if (m.stability < 30) {
+                shouldCollapse = true;
+                collapseReason = `メンバー国（${m.name}）の深刻な国内不安`;
+                break;
+            }
+        }
+        
+        if (shouldCollapse) {
+            log(`【大国協調崩壊】${collapseReason}により、大国協調体制（ウィーン体制）は崩壊しました。世界は再び戦乱の混沌に包まれます。`, "log-war");
+            concertDuration = 0;
+            concertMembers = [];
+        } else {
+            // 協調効果: 緊張感の更なる減衰
+            worldTension = Math.max(0, worldTension - 1.0);
+            
+            // 35%の確率で他国間の戦争を強制仲介
+            if (Math.random() < 0.35) {
+                // 協調メンバー以外の交戦中ペアを探す
+                let warPairs = [];
+                nations.forEach(n => {
+                    if (!n.isDead && !concertMembers.includes(n.id) && n.atWarWith.length > 0) {
+                        n.atWarWith.forEach(eId => {
+                            if (!concertMembers.includes(eId) && eId > n.id) { // eId > n.id to avoid duplicate pairs
+                                const enemy = nations.find(e => e.id === eId);
+                                if (enemy && !enemy.isDead) {
+                                    warPairs.push({ a: n, b: enemy });
+                                }
+                            }
+                        });
+                    }
+                });
+                
+                if (warPairs.length > 0) {
+                    const pair = warPairs[Math.floor(Math.random() * warPairs.length)];
+                    concludePeace(pair.a, pair.b, 'WHITE_PEACE');
+                    log(`【協調介入】大国協調体制による合同外交介入により、${pair.a.name}と${pair.b.name}の戦争は強制的に終結させられました。`, "log-peace");
+                }
+            }
+            
+            if (concertDuration === 0) {
+                log("【大国協調終結】合意期限が満了したため、大国協調体制（ウィーン体制）は円満に終了しました。平和な一時が終わり、再び動乱の時代へ向かいます。", "log-info");
+                concertMembers = [];
+            }
+        }
+    } else {
+        // トリガーチェック
+        // 1. 緊張度が40%以上
+        // 2. 世界覇権国（秩序維持国）が存在しない
+        // 3. 2カ国以上の大国が存在する
+        if (worldTension > 40 && hegemonStatus !== "秩序維持国" && activeScenario !== 'TOTALLER_KRIEG') {
+            const gps = getGreatPowers();
+            if (gps.length >= 2) {
+                concertDuration = Math.floor(25 + Math.random() * 25); // 25 to 50 ticks
+                concertMembers = gps.map(g => g.id);
+                
+                // メンバー国同士が戦争中であれば即座に強制和解
+                for (let i = 0; i < gps.length; i++) {
+                    for (let j = i + 1; j < gps.length; j++) {
+                        const gp1 = gps[i];
+                        const gp2 = gps[j];
+                        if (gp1.atWarWith.includes(gp2.id)) {
+                            concludePeace(gp1, gp2, 'WHITE_PEACE');
+                        }
+                    }
+                }
+                
+                worldTension = Math.max(0, worldTension - 20); // 緊張度の緩和
+                log(`【大国協調発足】急激な国際緊張に対抗し、主要大国（${gps.map(g => g.name).join('、')}）は世界の秩序と安定を回復するため「大国協調体制（ウィーン体制）」を組織しました。`, "log-peace");
+            }
+        }
+    }
+
     // 長期高緊張による厭戦
     if (worldTension > 90) {
         highTensionDuration++;
@@ -5737,6 +5865,9 @@ function declareWar(n1, n2) {
     // 宗主国と傀儡国、および傀儡国同士は絶対に戦わない
     if ((n1.isPuppet && n1.masterId === n2.id) || (n2.isPuppet && n2.masterId === n1.id)) return;
     if (n1.isPuppet && n2.isPuppet && n1.masterId === n2.masterId && n1.masterId !== -1) return;
+
+    // 大国協調体制（ウィーン体制）のメンバー同士は戦争しない
+    if (concertDuration > 0 && concertMembers.includes(n1.id) && concertMembers.includes(n2.id)) return;
 
     if(n1.atWarWith.includes(n2.id)) return;
     n1.atWarWith.push(n2.id);
@@ -6780,7 +6911,9 @@ function saveGame() {
         internationalAllianceId, internationalVersion,
         alliedNationsId,
         isSpecialAlliancesEnabled,
-        frameCounter, simSpeed
+        frameCounter, simSpeed,
+        concertDuration,
+        concertMembers
     };
     
     const blob = new Blob([JSON.stringify(saveData)], {type: 'application/octet-stream'});
@@ -6828,6 +6961,9 @@ function loadGame(file) {
             frameCounter = data.frameCounter;
             simSpeed = data.simSpeed;
             
+            concertDuration = data.concertDuration !== undefined ? data.concertDuration : 0;
+            concertMembers = data.concertMembers || [];
+            
             // Rehydrate
             nations.forEach(n => {
                 Object.setPrototypeOf(n, Nation.prototype);
@@ -6849,6 +6985,17 @@ function loadGame(file) {
             document.getElementById('top-ui-tension').innerText = worldTension.toFixed(1) + "%";
             document.getElementById('simSpeed').value = simSpeed;
             updateSpecialAlliancesUI();
+
+            const cEl = document.getElementById('info-concert');
+            if (cEl) {
+                if (concertDuration > 0) {
+                    cEl.innerText = `発足中 (残り ${concertDuration}年)`;
+                    cEl.style.color = "#00ffff";
+                } else {
+                    cEl.innerText = "非発足";
+                    cEl.style.color = "#ccc";
+                }
+            }
             
             // Switch to sim mode
             document.getElementById('menu-panel').style.display = 'none';
