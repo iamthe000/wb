@@ -1810,6 +1810,12 @@ class Nation {
         // Diplomacy
         this.relations = {}; // { nationId: value (-100 to 100) }
         this.atWarWith = []; // list of nation IDs
+        // 相手国ごとの開戦年。講和条件と政変後の外交処理に使う。
+        this.warStartedAt = {};
+        // 大規模国家モードで独立を保つための、初期領土を基準にした規模。
+        this.megaCoreTiles = 0;
+        // 初期首都周辺の本土。独立国である間は一部を維持する。
+        this.megaHomelandTiles = [];
         this.centroid = {x: 0, y: 0};
         this.visualCentroid = {x: 0, y: 0};
         this.visualAngle = 0;
@@ -2490,6 +2496,12 @@ function spawnNations() {
         }
         
         expandTerritoryInitial();
+
+        // 独立国の戦後最低領土を、生成時に与えられた規模から決める。
+        nations.forEach(n => {
+            n.megaCoreTiles = n.tiles.length;
+            n.megaHomelandTiles = createMegaHomelandTiles(n);
+        });
 
         // Generate multiple cities for these massive nations
         nations.forEach(n => {
@@ -3725,6 +3737,9 @@ function handlePolitics(n) {
         n.stability = Math.max(0, n.stability - 30);
         log(`${oldName}で政変が発生！ ${oldGov}から${n.sysDetailed}へ体制が変わり、${n.name}となりました。`, "log-war");
         n.addHistory(`政変: ${oldGov} -> ${n.sysDetailed} (${oldName} -> ${n.name})`);
+
+        // 新政権は旧政権の戦争目的をそのまま継承しない。戦況に応じて停戦を優先する。
+        settleWarsAfterCoup(n);
     }
 
     // 民主制への移行
@@ -4185,7 +4200,7 @@ function triggerCityRebellion(n, cities) {
 
     if (rebel.tiles.length > 0) {
         nations.push(rebel);
-        declareWar(n, rebel);
+        declareWar(n, rebel, true);
         log(`${n.name}で内戦が発生！ ${cities.map(c => c.name).join('、')}が${rebel.name}として蜂起しました。`, "log-war");
         n.addHistory(`内戦勃発: ${rebel.name}が蜂起`);
         rebel.addHistory(`蜂起: ${n.name}に対し反乱を開始`);
@@ -4294,7 +4309,7 @@ function triggerSuccessionCivilWar(n) {
         n.updateCentroid();
         
         // War
-        declareWar(n, rebel);
+        declareWar(n, rebel, true);
         
         // Log
         const warTitle = n.isSocialist() ? "権力闘争" : "帝位継承戦争";
@@ -5404,12 +5419,13 @@ function simulateTick() {
         }
 
         // 関係変動要因 (より過激に)
-        let change = (Math.random() - 0.5) * 5; 
-        if (n.religion === target.religion) change += 5;
-        else change -= 5;
+        const isMegaNations = activeScenario === 'MEGA_NATIONS';
+        let change = (Math.random() - 0.5) * (isMegaNations ? 2 : 5);
+        if (n.religion === target.religion) change += isMegaNations ? 1.5 : 5;
+        else change -= isMegaNations ? 1.5 : 5;
 
         // 政治体制が同じなら親近感
-        if (n.sysBroad === target.sysBroad) change += 3;
+        if (n.sysBroad === target.sysBroad) change += isMegaNations ? 1 : 3;
 
         // 同じ国際機構に加盟していれば親近感
         const sameOrg = organizations.some(org => org.members.includes(n.id) && org.members.includes(target.id));
@@ -5426,7 +5442,7 @@ function simulateTick() {
         if (neighbor) change -= 3;
 
         // ボーダーインシデント (突発的な悪化)
-        if (neighbor && Math.random() < 0.05) {
+        if (neighbor && Math.random() < (isMegaNations ? 0.01 : 0.05)) {
             change -= 40;
             log(`偶発的衝突: ${n.name}と${target.name}の間で緊張が高まっています！`, "log-war");
         }
@@ -5468,6 +5484,8 @@ function simulateTick() {
         
         let warThreshold = -50;
         let isColdWar = false;
+
+        if (isMegaNations) warThreshold = -70;
 
         if (activeScenario === 'QUIET_SPARKS') {
             warThreshold = -70; 
@@ -5516,6 +5534,10 @@ function simulateTick() {
             ambitionChance /= 5;
             ambitionThreshold += 1.0;
         }
+        if (isMegaNations) {
+            ambitionThreshold = n.isGrandEmpire ? 1.7 : 2.5;
+            ambitionChance = n.isGrandEmpire ? 0.04 : 0.01;
+        }
 
         if ((neighbor || canNavalInvade) && n.getMilitaryPower() > target.getMilitaryPower() * ambitionThreshold && Math.random() < ambitionChance) {
             if (!n.atWarWith.includes(target.id)) {
@@ -5535,6 +5557,13 @@ function simulateTick() {
         // 和平判定
         else if (n.atWarWith.includes(target.id)) {
             let peaceChance = (activeScenario === 'MEGA_NATIONS') ? 0.03 : 0.005; // 基礎和平確率 (大規模国家モードでは講和しやすくする)
+            const warDuration = getWarDuration(n, target);
+            if (isMegaNations) {
+                // 大国同士の戦争は短期間で国家の存亡を決めず、長期化するほど厭戦から交渉へ向かう。
+                if (warDuration >= 6) peaceChance += 0.04;
+                if (warDuration >= 12) peaceChance += 0.08;
+                if (n.stability < 45 || target.stability < 45) peaceChance += 0.06;
+            }
             if (n.relations[target.id] > -20) peaceChance += 0.02;
             
             // 地形による和平確率の上昇 (山や川が境界だと膠着しやすい)
@@ -5559,11 +5588,13 @@ function simulateTick() {
                     const rMax = Math.max(ratio, 1 / ratio);
                     
                     if (rMax > 3.0) {
-                        // 圧倒的/優勢な場合、傀儡化(PUPPET)か一部割譲(PARTIAL_PEACE)
-                        if (Math.random() < 0.5 && loser.cities.length >= 2) {
+                        // 傀儡化は政権崩壊を伴う長期の決定的敗北に限定する。
+                        if (warDuration >= 24 && loser.stability < 20 && Math.random() < 0.2 && loser.cities.length >= 2) {
                             concludePeace(n, target, 'PUPPET');
-                        } else {
+                        } else if (Math.random() < 0.55) {
                             concludePeace(n, target, 'PARTIAL_PEACE');
+                        } else {
+                            concludePeace(n, target, 'ANNEX_BORDER');
                         }
                     } else if (rMax > 1.5) {
                         // やや優勢な場合、一部割譲(PARTIAL_PEACE)か国境割譲(ANNEX_BORDER)
@@ -5574,7 +5605,7 @@ function simulateTick() {
                         }
                     } else {
                         // 膠着
-                        if (Math.random() < 0.5) {
+                        if (Math.random() < 0.75) {
                             concludePeace(n, target, 'WHITE_PEACE');
                         } else {
                             concludePeace(n, target, 'PARTIAL_PEACE');
@@ -5858,7 +5889,113 @@ function getBoundaryComposition(n1, n2) {
     return counts;
 }
 
-function declareWar(n1, n2) {
+function getWarDuration(n1, n2) {
+    const startedAt = Math.min(
+        n1.warStartedAt?.[n2.id] ?? year,
+        n2.warStartedAt?.[n1.id] ?? year
+    );
+    return Math.max(0, year - startedAt);
+}
+
+function getMegaIndependentTerritoryFloor(nation) {
+    if (activeScenario !== 'MEGA_NATIONS' || nation.isPuppet) return 0;
+    // セーブデータには追加前の基準値がないため、最初に観測した規模を保護基準にする。
+    if (!nation.megaCoreTiles) nation.megaCoreTiles = nation.tiles.length;
+    return Math.max(30, Math.floor(nation.megaCoreTiles * 0.6));
+}
+
+function createMegaHomelandTiles(nation) {
+    if (!nation.tiles.length) return [];
+    const targetSize = Math.max(1, Math.floor(nation.tiles.length * 0.35));
+    const capitalTile = nation.cities[0]?.tileIdx ?? nation.tiles[0];
+    const homeland = new Set([capitalTile]);
+    const queue = [capitalTile];
+
+    for (let i = 0; i < queue.length && homeland.size < targetSize; i++) {
+        const tileIdx = queue[i];
+        const x = tileIdx % width;
+        const y = Math.floor(tileIdx / width);
+        [[1, 0], [-1, 0], [0, 1], [0, -1]].forEach(([dx, dy]) => {
+            const nx = x + dx;
+            const ny = y + dy;
+            const nextIdx = ny * width + nx;
+            if (nx >= 0 && nx < width && ny >= 0 && ny < height &&
+                ownerGrid[nextIdx] === nation.id && !homeland.has(nextIdx) && homeland.size < targetSize) {
+                homeland.add(nextIdx);
+                queue.push(nextIdx);
+            }
+        });
+    }
+    return [...homeland];
+}
+
+function canCedeMegaTerritory(nation, tileIdx) {
+    if (activeScenario !== 'MEGA_NATIONS' || nation.isPuppet) return true;
+    if (!nation.megaHomelandTiles?.length) nation.megaHomelandTiles = createMegaHomelandTiles(nation);
+
+    // 首都は独立国の地理的な継続性を保つため、通常講和では割譲しない。
+    if (nation.cities[0]?.tileIdx === tileIdx) return false;
+    if (!nation.megaHomelandTiles.includes(tileIdx)) return true;
+
+    const homelandRemaining = nation.megaHomelandTiles.filter(t => ownerGrid[t] === nation.id).length;
+    const homelandMinimum = Math.ceil(nation.megaHomelandTiles.length * 0.6);
+    return homelandRemaining > homelandMinimum;
+}
+
+function settleWarsAfterCoup(nation) {
+    if (activeScenario === 'TOTALLER_KRIEG' || nation.atWarWith.length === 0) return;
+
+    const enemies = [...nation.atWarWith];
+    enemies.forEach(enemyId => {
+        const enemy = nations.find(n => n.id === enemyId);
+        if (!enemy || enemy.isDead || !nation.atWarWith.includes(enemyId)) return;
+
+        const nationIsLosing = nation.getMilitaryPower() < enemy.getMilitaryPower() * 0.8;
+        const canOfferTerms = getWarDuration(nation, enemy) >= 4;
+        const type = nationIsLosing && canOfferTerms && Math.random() < 0.35
+            ? 'PARTIAL_PEACE'
+            : 'WHITE_PEACE';
+
+        concludePeace(nation, enemy, type);
+        log(`政変後の外交: ${nation.name}は${enemy.name}との戦争を${type === 'WHITE_PEACE' ? '白紙講和' : '限定的な譲歩'}で終結させました。`, "log-peace");
+    });
+}
+
+function getActiveWarTheaterCount() {
+    const living = nations.filter(n => !n.isDead && n.atWarWith.length > 0);
+    const visited = new Set();
+    let theaters = 0;
+
+    living.forEach(start => {
+        if (visited.has(start.id)) return;
+        theaters++;
+        const queue = [start.id];
+        visited.add(start.id);
+        for (let i = 0; i < queue.length; i++) {
+            const nation = nations.find(n => n.id === queue[i]);
+            if (!nation) continue;
+            nation.atWarWith.forEach(enemyId => {
+                if (!visited.has(enemyId)) {
+                    visited.add(enemyId);
+                    queue.push(enemyId);
+                }
+            });
+        }
+    });
+    return theaters;
+}
+
+function canStartMegaNationWar(n1, n2) {
+    if (activeScenario !== 'MEGA_NATIONS') return true;
+
+    // 一国が複数の独立戦争を始める挙動と、全世界同時開戦を避ける。
+    if (n1.atWarWith.length > 0 || n2.atWarWith.length > 0) return false;
+    const livingCount = nations.filter(n => !n.isDead).length;
+    const maxTheaters = Math.max(1, Math.floor(livingCount / 4));
+    return getActiveWarTheaterCount() < maxTheaters;
+}
+
+function declareWar(n1, n2, isIntervention = false) {
     if (n1.id === n2.id) return;
     if (n1.isDead || n2.isDead) return;
 
@@ -5869,9 +6006,15 @@ function declareWar(n1, n2) {
     // 大国協調体制（ウィーン体制）のメンバー同士は戦争しない
     if (concertDuration > 0 && concertMembers.includes(n1.id) && concertMembers.includes(n2.id)) return;
 
+    if (!isIntervention && !canStartMegaNationWar(n1, n2)) return;
+
     if(n1.atWarWith.includes(n2.id)) return;
     n1.atWarWith.push(n2.id);
     if(!n2.atWarWith.includes(n1.id)) n2.atWarWith.push(n1.id);
+    n1.warStartedAt ??= {};
+    n2.warStartedAt ??= {};
+    n1.warStartedAt[n2.id] = year;
+    n2.warStartedAt[n1.id] = year;
     worldTension = Math.min(100, worldTension + 5);
     log(`戦争: ${n1.name}が${n2.name}に宣戦布告しました！（緊張度: ${worldTension.toFixed(1)}%）`, "log-war");
     n1.addHistory(`宣戦布告: 対${n2.name}`);
@@ -5885,7 +6028,7 @@ function declareWar(n1, n2) {
             if (n1.id !== master.id && !(n1.isPuppet && n1.masterId === master.id)) {
                 if (!master.atWarWith.includes(n1.id)) {
                      log(`${n2.name}の宗主国である${master.name}が保護義務を履行し、参戦しました。`, "log-war");
-                     declareWar(master, n1);
+                     declareWar(master, n1, true);
                 }
             }
         }
@@ -5925,14 +6068,15 @@ function declareWar(n1, n2) {
             if (ally.isPuppet && n1.isPuppet && ally.masterId === n1.masterId && ally.masterId !== -1) return;
 
             // 確率で参戦 (高い確率)
-            if (Math.random() < 0.9) {
+            const interventionChance = activeScenario === 'MEGA_NATIONS' ? 0.4 : 0.9;
+            if (Math.random() < interventionChance) {
                 let reason = `${n2.name}との同盟に基づき`;
                 if (n2.allianceId !== -1 && n2.allianceId === ally.allianceId) {
                     const alliance = alliances.find(a => a.id === n2.allianceId);
                     if (alliance) reason = `同盟ブロック「${alliance.name}」の義務として`;
                 }
                 log(`同盟義務: ${ally.name}は${reason}、${n1.name}に宣戦布告しました！`, "log-war");
-                declareWar(ally, n1);
+                declareWar(ally, n1, true);
             } else {
                 log(`同盟不履行: ${ally.name}は${n2.name}への援軍を拒否しました...(関係悪化)`, "log-info");
                 // 関係悪化
@@ -5961,6 +6105,8 @@ function concludePeace(n1, n2, type) {
 
     n1.atWarWith = n1.atWarWith.filter(id => id !== n2.id);
     n2.atWarWith = n2.atWarWith.filter(id => id !== n1.id);
+    if (n1.warStartedAt) delete n1.warStartedAt[n2.id];
+    if (n2.warStartedAt) delete n2.warStartedAt[n1.id];
 
     if (type === 'WHITE_PEACE') {
         log(`白紙講和: ${n1.name}と${n2.name}が現状維持で停戦しました。`, "log-peace");
@@ -5969,7 +6115,14 @@ function concludePeace(n1, n2, type) {
     } else if (type === 'PARTIAL_PEACE') {
         // Transfer some cities as a condition
         // 勝者の本国に近い都市を優先的に割譲させる
-        const numCitiesToTransfer = Math.min(loser.cities.length - 1, 2);
+        const maxCitiesToTransfer = activeScenario === 'MEGA_NATIONS' ? 1 : 2;
+        const citiesToPreserve = activeScenario === 'MEGA_NATIONS' && !loser.isPuppet ? 2 : 1;
+        const minimumRemainingTiles = getMegaIndependentTerritoryFloor(loser);
+        // 都市一つの周囲を割譲すると最大で約121タイル失うため、下限を割る場合は都市割譲をしない。
+        const canCedeCity = loser.isPuppet || loser.tiles.length - 121 >= minimumRemainingTiles;
+        const numCitiesToTransfer = canCedeCity
+            ? Math.min(loser.cities.length - citiesToPreserve, maxCitiesToTransfer)
+            : 0;
         
         if (numCitiesToTransfer > 0) {
             // 距離計算用ヘルパー
@@ -5980,7 +6133,11 @@ function concludePeace(n1, n2, type) {
             };
 
             // 勝者の重心に近い順にソート
-            const sortedCities = [...loser.cities].sort((a, b) => {
+            const candidateCities = loser.cities.filter(city =>
+                (activeScenario !== 'MEGA_NATIONS' || loser.isPuppet || city !== loser.cities[0]) &&
+                canCedeMegaTerritory(loser, city.tileIdx)
+            );
+            const sortedCities = candidateCities.sort((a, b) => {
                 return getDist(a, winner.centroid) - getDist(b, winner.centroid);
             });
 
@@ -6003,7 +6160,7 @@ function concludePeace(n1, n2, type) {
                         const ny = cy + dy;
                         if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
                             const idx = ny * width + nx;
-                            if (ownerGrid[idx] === loser.id) {
+                            if (ownerGrid[idx] === loser.id && canCedeMegaTerritory(loser, idx)) {
                                 ownerGrid[idx] = winner.id;
                                 winner.tiles.push(idx);
                                 loser.tiles = loser.tiles.filter(t => t !== idx);
@@ -6019,8 +6176,11 @@ function concludePeace(n1, n2, type) {
             log(`和平: ${n1.name}と${n2.name}が停戦合意しました。`, "log-peace");
         }
     } else if (type === 'ANNEX_BORDER') {
-        // 国境地帯の割譲 (約20%)
-        const targetCount = Math.floor(loser.tiles.length * 0.2);
+        // 国境地帯の割譲。大規模国家モードでは戦後の国境修正に留める。
+        const borderTransferRatio = activeScenario === 'MEGA_NATIONS' ? 0.1 : 0.2;
+        const minimumRemainingTiles = getMegaIndependentTerritoryFloor(loser);
+        const maximumTransfer = Math.max(0, loser.tiles.length - minimumRemainingTiles);
+        const targetCount = Math.min(Math.floor(loser.tiles.length * borderTransferRatio), maximumTransfer);
         
         // 1. 直接接触しているタイルを特定
         let borderTiles = [];
@@ -6042,9 +6202,11 @@ function concludePeace(n1, n2, type) {
             if(isBorder) borderTiles.push(tIdx);
         }
 
-        if (borderTiles.length > 0) {
-            const queue = [...borderTiles];
-            const takenSet = new Set(borderTiles);
+        if (borderTiles.length > 0 && targetCount > 0) {
+            // 国境全域を初期集合にすると目標面積を超えるため、限定した一地点から進める。
+            const seedTile = borderTiles[Math.floor(Math.random() * borderTiles.length)];
+            const queue = [seedTile];
+            const takenSet = new Set([seedTile]);
             
             let head = 0;
             while(head < queue.length && takenSet.size < targetCount) {
@@ -6057,7 +6219,7 @@ function concludePeace(n1, n2, type) {
                     let nx=cx+dx, ny=cy+dy;
                     if(nx>=0 && nx<width && ny>=0 && ny<height) {
                         let nIdx = ny*width+nx;
-                        if(ownerGrid[nIdx] === loser.id && !takenSet.has(nIdx)) {
+                        if(ownerGrid[nIdx] === loser.id && !takenSet.has(nIdx) && canCedeMegaTerritory(loser, nIdx)) {
                             takenSet.add(nIdx);
                             queue.push(nIdx);
                         }
@@ -6967,6 +7129,7 @@ function loadGame(file) {
             // Rehydrate
             nations.forEach(n => {
                 Object.setPrototypeOf(n, Nation.prototype);
+                n.warStartedAt = n.warStartedAt || {};
                 n.cities.forEach(c => Object.setPrototypeOf(c, City.prototype));
             });
             alliances.forEach(a => {
