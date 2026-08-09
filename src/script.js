@@ -190,6 +190,9 @@ let alliances = [];
 let allianceIdCounter = 0;
 let organizations = [];
 let orgIdCounter = 0;
+const UNITED_NATIONS_NAME = "国際連合";
+let hasExperiencedHighWorldTension = false;
+let isUnitedNationsEstablished = false;
 
 let concertDuration = 0;
 let concertMembers = []; // List of great power nation IDs in the concert
@@ -375,6 +378,13 @@ function initGrid(size) {
     ownerGrid = new Array(width * height).fill(-1);
     continentMap = new Array(width * height).fill(-1);
     nations = [];
+    alliances = [];
+    allianceIdCounter = 0;
+    organizations = [];
+    orgIdCounter = 0;
+    worldTension = 0;
+    hasExperiencedHighWorldTension = false;
+    isUnitedNationsEstablished = false;
     isDrawing = true;
     year = 1;
     document.getElementById('log').innerHTML = '';
@@ -1093,13 +1103,19 @@ function renderAlliancesContent() {
                 <div style="font-weight:bold; color:#4db8ff; font-size:1.1em; border-bottom:1px solid #444; margin-bottom:5px; padding-bottom:3px;">${o.name}</div>
                 <div style="font-size:0.9em; margin-bottom:5px;"><b>加盟国 (${o.members.length}カ国):</b> ${memberNames}</div>
                 <div style="font-size:0.8em; color:#ccc;">
-                    目的: ${o.name === "世界貿易機構" ? "経済協力・関税撤廃" : "科学技術の共有と発展"}
+                    目的: ${getOrganizationPurpose(o)}
                 </div>
             `;
             orgSection.appendChild(div);
         });
         content.appendChild(orgSection);
     }
+}
+
+function getOrganizationPurpose(org) {
+    if (org.name === UNITED_NATIONS_NAME) return "国際協調の象徴（ゲーム上の特別効果なし）";
+    if (org.name === "世界貿易機構") return "経済協力・関税撤廃";
+    return "科学技術の共有と発展";
 }
 
 function renderRankingContent() {
@@ -4766,6 +4782,10 @@ function simulateDomesticPolitics(n) {
 }
 
 function simulateTick() {
+    if (worldTension >= 70) {
+        hasExperiencedHighWorldTension = true;
+    }
+
     // 民主主義の目覚めイベントのチェック
     if (!isDemocracyAwakened) {
         let maxTech = 0;
@@ -5428,7 +5448,9 @@ function simulateTick() {
         if (n.sysBroad === target.sysBroad) change += isMegaNations ? 1 : 3;
 
         // 同じ国際機構に加盟していれば親近感
-        const sameOrg = organizations.some(org => org.members.includes(n.id) && org.members.includes(target.id));
+        const sameOrg = organizations.some(org =>
+            org.name !== UNITED_NATIONS_NAME && org.members.includes(n.id) && org.members.includes(target.id)
+        );
         if (sameOrg) change += 2;
         
         // Grand Empire: Hated by everyone
@@ -5684,6 +5706,14 @@ function simulateTick() {
             });
         }
     });
+
+    // 一度でも高緊張に達した世界が低緊張へ戻った時だけ、平和達成を記録する。
+    if (worldTension >= 70) {
+        hasExperiencedHighWorldTension = true;
+    }
+    if (hasExperiencedHighWorldTension && worldTension <= 5 && !isUnitedNationsEstablished) {
+        establishUnitedNations();
+    }
 }
 
 function formAlliance(n1, n2) {
@@ -5803,6 +5833,9 @@ function manageInternationalOrganizations() {
 
     // 2. Membership management and effects
     organizations.forEach(org => {
+        // 国際連合は平和達成を記録するための機関であり、ゲーム上の効果は持たない。
+        if (org.name === UNITED_NATIONS_NAME) return;
+
         nations.forEach(n => {
             if (n.isDead) return;
 
@@ -5838,6 +5871,27 @@ function manageInternationalOrganizations() {
             }
         });
     });
+}
+
+function establishUnitedNations() {
+    if (isUnitedNationsEstablished) return;
+
+    let unitedNations = organizations.find(org => org.name === UNITED_NATIONS_NAME);
+    if (!unitedNations) {
+        unitedNations = new InternationalOrganization(orgIdCounter++, UNITED_NATIONS_NAME);
+        organizations.push(unitedNations);
+    }
+
+    const memberNations = nations.filter(n => !n.isDead);
+    memberNations.forEach(n => {
+        if (!n.organizationIds.includes(unitedNations.id)) n.organizationIds.push(unitedNations.id);
+        if (!unitedNations.members.includes(n.id)) unitedNations.members.push(n.id);
+    });
+
+    const host = getGreatPowers()[0] || memberNations[0];
+    const hostName = host ? host.name : "世界各国";
+    log(`【世界平和の達成】${hostName}で国連憲章が調印され、国際連合が結成された。`, "log-peace");
+    isUnitedNationsEstablished = true;
 }
 
 function isNeighbor(n1, n2) {
@@ -7068,6 +7122,7 @@ function saveGame() {
         alliances, allianceIdCounter,
         organizations, orgIdCounter,
         year, worldTension,
+        hasExperiencedHighWorldTension, isUnitedNationsEstablished,
         hegemonId, hegemonStatus, highTensionDuration,
         isDemocracyAwakened, isSocialismSprouted,
         internationalAllianceId, internationalVersion,
@@ -7111,6 +7166,12 @@ function loadGame(file) {
             orgIdCounter = data.orgIdCounter || 0;
             year = data.year;
             worldTension = data.worldTension;
+            hasExperiencedHighWorldTension = data.hasExperiencedHighWorldTension !== undefined
+                ? data.hasExperiencedHighWorldTension
+                : worldTension >= 70;
+            isUnitedNationsEstablished = data.isUnitedNationsEstablished !== undefined
+                ? data.isUnitedNationsEstablished
+                : organizations.some(org => org.name === UNITED_NATIONS_NAME);
             hegemonId = data.hegemonId;
             hegemonStatus = data.hegemonStatus;
             highTensionDuration = data.highTensionDuration;
