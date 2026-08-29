@@ -89,8 +89,11 @@ const POLITICAL_SYSTEMS = {
 function generatePoliticalSystem(currentTech) {
     // 1. Broad Framework (Weight by Tech)
     let broad;
-    if (!isDemocracyAwakened) {
+    if (!isDemocracyAwakened || isDemocracyDefeated) {
         broad = Math.random() < 0.7 ? '権威主義' : '全体主義';
+        if (isDemocracyDefeated && isDemocracyAwakened && Math.random() < 0.01) {
+            broad = '民主主義';
+        }
     } else if (currentTech < 2) { // Primitive/Agrarian -> mostly Authoritarian
         broad = Math.random() < 0.8 ? '権威主義' : (Math.random() < 0.5 ? '全体主義' : '民主主義');
     } else {
@@ -181,6 +184,10 @@ let hegemonStatus = "";
 let highTensionDuration = 0;
 let isDemocracyAwakened = false;
 let isSocialismSprouted = false;
+let isDemocracyDefeated = false;
+let isSocialismDefeated = false;
+let hasHadDemocracy = false;
+let hasHadSocialism = false;
 let internationalAllianceId = -1;
 let internationalVersion = 1;
 let alliedNationsId = -1;
@@ -387,6 +394,10 @@ function initGrid(size) {
     hasExperiencedHighWorldTension = false;
     isUnitedNationsEstablished = false;
     hasShownAlliedNationsModal = false;
+    isDemocracyDefeated = false;
+    isSocialismDefeated = false;
+    hasHadDemocracy = false;
+    hasHadSocialism = false;
     isDrawing = true;
     year = 1;
     document.getElementById('log').innerHTML = '';
@@ -3761,7 +3772,8 @@ function handlePolitics(n) {
     }
 
     // 民主制への移行
-    if (isDemocracyAwakened && n.sysBroad !== '民主主義' && n.tech >= 3 && n.stability > 80 && Math.random() < 0.001) {
+    const demoChance = isDemocracyDefeated ? 0.00005 : 0.001;
+    if (isDemocracyAwakened && n.sysBroad !== '民主主義' && n.tech >= 3 && n.stability > 80 && Math.random() < demoChance) {
         // 徹底抗戦モードの枢軸国は民主化しない
         if (activeScenario === 'TOTALLER_KRIEG' && n.name === '枢軸国') return;
 
@@ -3780,7 +3792,8 @@ function handlePolitics(n) {
     }
 
     // 社会主義への移行
-    if (isSocialismSprouted && n.sysDetailed !== '前衛党独裁' && n.tech >= 2 && n.stability < 40 && Math.random() < 0.001) {
+    const socChance = isSocialismDefeated ? 0.00005 : 0.001;
+    if (isSocialismSprouted && n.sysDetailed !== '前衛党独裁' && n.tech >= 2 && n.stability < 40 && Math.random() < socChance) {
         // 徹底抗戦モードの枢軸国・連合国は革命不可
         if (activeScenario === 'TOTALLER_KRIEG' && (n.name === '枢軸国' || n.name === '連合国')) return;
 
@@ -4826,6 +4839,74 @@ function simulateTick() {
                 themeBg: "rgba(255, 59, 48, 0.15)"
             });
         }
+    }
+
+    // 生存国家と考え方の統計
+    const livingNations = nations.filter(n => !n.isDead);
+    const demoCount = livingNations.filter(n => n.sysBroad === '民主主義').length;
+    const socCount = livingNations.filter(n => n.isSocialist()).length;
+
+    if (demoCount > 0) hasHadDemocracy = true;
+    if (socCount > 0) hasHadSocialism = true;
+
+    // 民主主義の敗北イベントのチェック
+    if (isDemocracyAwakened && hasHadDemocracy && !isDemocracyDefeated && demoCount === 0 && livingNations.length > 0) {
+        isDemocracyDefeated = true;
+        log("歴史的転換点: 「民主主義の敗北」！ 世界からすべての民主主義国家が消滅しました。権威主義・全体主義の暗雲が世界を覆います。", "log-war");
+        showEventModal({
+            title: "民主主義の敗北",
+            category: "思想の黄昏",
+            icon: "🖤",
+            description: "最後の民主国家が倒れ、世界から民主主義が完全に消滅しました。民衆の自由と権利の灯火は消え去り、世界は再び強権的な支配の時代へと突入します。",
+            details: `発生年: 第${year}年 | 効果: 民主主義国家の新規出現率が大幅低下`,
+            themeColor: "#6b7280",
+            themeGlow: "rgba(107, 114, 128, 0.5)",
+            themeBg: "rgba(107, 114, 128, 0.15)"
+        });
+    } else if (isDemocracyDefeated && livingNations.length > 0 && (demoCount / livingNations.length) >= (2 / 3)) {
+        // 民主主義の復権イベントのチェック (全体の3分の2以上)
+        isDemocracyDefeated = false;
+        log("歴史的転換点: 「民主主義の復権」！ 暗黒の時代を乗り越え、世界の3分の2以上が再び民主政治を選択しました。", "log-peace");
+        showEventModal({
+            title: "民主主義の復権",
+            category: "思想の復活",
+            icon: "🕊️",
+            description: "長い抑圧と暗黒の時代を経て、民主主義が再び力強く甦りました。世界の過半数と3分の2を覆う民主主義国家群が、自由と自由平等の新時代を告げています。",
+            details: `発生年: 第${year}年 | 民主国家割合: ${(demoCount / livingNations.length * 100).toFixed(1)}%`,
+            themeColor: "#38bdf8",
+            themeGlow: "rgba(56, 189, 248, 0.5)",
+            themeBg: "rgba(56, 189, 248, 0.15)"
+        });
+    }
+
+    // 社会主義の敗北イベントのチェック
+    if (isSocialismSprouted && hasHadSocialism && !isSocialismDefeated && socCount === 0 && livingNations.length > 0) {
+        isSocialismDefeated = true;
+        log("歴史的転換点: 「社会主義の敗北」！ 世界からすべての社会主義国家が消滅しました。資本主義と伝統的秩序が勝利を収めました。", "log-war");
+        showEventModal({
+            title: "社会主義の敗北",
+            category: "思想の黄昏",
+            icon: "🥀",
+            description: "最後の社会主義・共産主義国家が消滅しました。労働者の理想を掲げた実験は終わりを迎え、資本主義と伝統的秩序が完全な勝利を収めました。",
+            details: `発生年: 第${year}年 | 効果: 社会主義体制の新規出現率が大幅低下`,
+            themeColor: "#9a3412",
+            themeGlow: "rgba(154, 52, 18, 0.5)",
+            themeBg: "rgba(154, 52, 18, 0.15)"
+        });
+    } else if (isSocialismDefeated && livingNations.length > 0 && (socCount / livingNations.length) >= (2 / 3)) {
+        // 社会主義の復権イベントのチェック (全体の3分の2以上)
+        isSocialismDefeated = false;
+        log("歴史的転換点: 「社会主義の復権」！ 世界の3分の2以上を社会主義国家が占め、新たな革命の時代が到来しました。", "log-peace");
+        showEventModal({
+            title: "社会主義の復権",
+            category: "思想の復活",
+            icon: "🚩",
+            description: "一度は消えかけた赤き理想の灯火が、世界中で圧倒的なうねりとなって再燃しました。世界の3分の2以上が社会主義・共産主義のもとに結束しています。",
+            details: `発生年: 第${year}年 | 社会主義国家割合: ${(socCount / livingNations.length * 100).toFixed(1)}%`,
+            themeColor: "#ef4444",
+            themeGlow: "rgba(239, 68, 68, 0.5)",
+            themeBg: "rgba(239, 68, 68, 0.15)"
+        });
     }
 
     updateMilitaryGrid();
@@ -7259,6 +7340,8 @@ function saveGame() {
         hasExperiencedHighWorldTension, isUnitedNationsEstablished,
         hegemonId, hegemonStatus, highTensionDuration,
         isDemocracyAwakened, isSocialismSprouted,
+        isDemocracyDefeated, isSocialismDefeated,
+        hasHadDemocracy, hasHadSocialism,
         internationalAllianceId, internationalVersion,
         alliedNationsId, hasShownAlliedNationsModal,
         isSpecialAlliancesEnabled,
@@ -7311,6 +7394,10 @@ function loadGame(file) {
             highTensionDuration = data.highTensionDuration;
             isDemocracyAwakened = data.isDemocracyAwakened || false;
             isSocialismSprouted = data.isSocialismSprouted || false;
+            isDemocracyDefeated = data.isDemocracyDefeated || false;
+            isSocialismDefeated = data.isSocialismDefeated || false;
+            hasHadDemocracy = data.hasHadDemocracy || false;
+            hasHadSocialism = data.hasHadSocialism || false;
             internationalAllianceId = data.internationalAllianceId !== undefined ? data.internationalAllianceId : -1;
             internationalVersion = data.internationalVersion || 1;
             alliedNationsId = data.alliedNationsId !== undefined ? data.alliedNationsId : -1;
