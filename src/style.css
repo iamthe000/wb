@@ -546,6 +546,89 @@ input[type="range"]::-webkit-slider-thumb:hover {
     transition: width 0.5s ease;
 }
 
+/* Custom Event Modal Specific Styles */
+.event-modal-theme {
+    border: 1px solid var(--border-color-glow);
+    box-shadow: 0 25px 60px rgba(0, 0, 0, 0.9), 0 0 35px var(--event-theme-glow, rgba(0, 240, 255, 0.3));
+    background: linear-gradient(160deg, #121824 0%, #0d111a 100%);
+}
+
+.event-modal-header {
+    border-bottom: 1px solid var(--border-color);
+    padding-bottom: 12px;
+    margin-bottom: 16px;
+}
+
+.event-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--event-theme-bg, rgba(0, 240, 255, 0.12));
+    border: 1px solid var(--event-theme-color, var(--color-primary));
+    color: var(--event-theme-color, var(--color-primary));
+    padding: 3px 10px;
+    border-radius: 20px;
+    font-size: 0.75em;
+    font-weight: bold;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    margin-bottom: 8px;
+    box-shadow: 0 0 10px var(--event-theme-glow, rgba(0, 240, 255, 0.2));
+}
+
+.event-modal-header h2 {
+    margin: 0;
+    font-size: 1.35em;
+    color: #ffffff;
+    border-left: none;
+    padding-left: 0;
+    text-shadow: 0 0 12px var(--event-theme-glow, rgba(0, 240, 255, 0.3));
+}
+
+.event-modal-body {
+    font-size: 0.95em;
+    line-height: 1.6;
+    color: var(--text-primary);
+    margin-bottom: 20px;
+}
+
+.event-modal-body p {
+    margin-top: 0;
+    margin-bottom: 12px;
+}
+
+.event-details-box {
+    background: rgba(0, 0, 0, 0.35);
+    border: 1px dashed var(--border-color-glow);
+    border-radius: 6px;
+    padding: 10px 14px;
+    font-size: 0.85em;
+    color: var(--text-secondary);
+    margin-top: 12px;
+}
+
+.event-modal-footer button {
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.1), rgba(0, 0, 0, 0.4));
+    color: #ffffff;
+    border: 1px solid var(--event-theme-color, var(--color-primary));
+    font-size: 0.95em;
+    padding: 11px;
+    font-weight: bold;
+    box-shadow: 0 0 12px var(--event-theme-glow, rgba(0, 240, 255, 0.3));
+    transition: all 0.2s ease;
+}
+
+.event-modal-footer button:hover {
+    background: var(--event-theme-color, var(--color-primary));
+    color: #020205;
+    box-shadow: 0 0 18px var(--event-theme-glow, rgba(0, 240, 255, 0.5));
+    transform: translateY(-1px);
+}
+
+.event-modal-footer button:active {
+    transform: translateY(1px);
+}
+
 /* Edit Modal Form Styles */
 .edit-form-group {
     margin-bottom: 16px;
