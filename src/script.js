@@ -184,6 +184,7 @@ let isSocialismSprouted = false;
 let internationalAllianceId = -1;
 let internationalVersion = 1;
 let alliedNationsId = -1;
+let hasShownAlliedNationsModal = false;
 let isSpecialAlliancesEnabled = true;
 
 let alliances = [];
@@ -385,6 +386,7 @@ function initGrid(size) {
     worldTension = 0;
     hasExperiencedHighWorldTension = false;
     isUnitedNationsEstablished = false;
+    hasShownAlliedNationsModal = false;
     isDrawing = true;
     year = 1;
     document.getElementById('log').innerHTML = '';
@@ -6592,6 +6594,57 @@ function concludePeace(n1, n2, type) {
     }
 }
 
+function getHueFromColor(colorStr) {
+    if (!colorStr) return Math.floor(Math.random() * 360);
+    if (colorStr.startsWith('hsl')) {
+        const m = colorStr.match(/hsl\(\s*(\d+(?:\.\d+)?)/);
+        if (m) return parseFloat(m[1]);
+    } else if (colorStr.startsWith('#')) {
+        let hex = colorStr.slice(1);
+        if (hex.length === 3) hex = hex.split('').map(c => c + c).join('');
+        if (hex.length === 6) {
+            const r = parseInt(hex.substring(0,2), 16) / 255;
+            const g = parseInt(hex.substring(2,4), 16) / 255;
+            const b = parseInt(hex.substring(4,6), 16) / 255;
+            const max = Math.max(r, g, b), min = Math.min(r, g, b);
+            let h = 0;
+            if (max !== min) {
+                const d = max - min;
+                switch (max) {
+                    case r: h = (g - b) / d + (g < b ? 6 : 0); break;
+                    case g: h = (b - r) / d + 2; break;
+                    case b: h = (r - g) / d + 4; break;
+                }
+                h /= 6;
+            }
+            return h * 360;
+        }
+    }
+    return Math.floor(Math.random() * 360);
+}
+
+function isWarmColor(colorStr) {
+    const h = getHueFromColor(colorStr);
+    return (h <= 60 || h >= 330);
+}
+
+function isCoolColor(colorStr) {
+    const h = getHueFromColor(colorStr);
+    return (h >= 170 && h <= 270);
+}
+
+function getWarmColor() {
+    const warmHues = [0, 15, 30, 45, 345, 355];
+    const h = warmHues[Math.floor(Math.random() * warmHues.length)];
+    return `hsl(${h}, 85%, 55%)`;
+}
+
+function getCoolColor() {
+    const coolHues = [185, 200, 215, 230, 240];
+    const h = coolHues[Math.floor(Math.random() * coolHues.length)];
+    return `hsl(${h}, 85%, 55%)`;
+}
+
 function makePeace(n1, n2) {
     concludePeace(n1, n2, 'DEFAULT');
 }
@@ -6660,6 +6713,14 @@ function manageTheInternational() {
         }
     });
 
+    // インターナショナル加盟国を暖色系（赤・オレンジ系）に統一
+    international.members.forEach(mId => {
+        const m = nations.find(nat => nat.id === mId);
+        if (m && !isWarmColor(m.color)) {
+            m.color = getWarmColor();
+        }
+    });
+
     // 死んだ国の除外は Alliance クラスや既存ロジックで概ね処理されるが、
     // インターナショナル自体が崩壊（全滅）した場合のケア
     if (international.members.every(mId => {
@@ -6717,16 +6778,19 @@ function manageAlliedNations() {
             alliances.push(alliedNations);
             alliedNationsId = alliedNations.id;
             log(`自由主義の危機！ インターナショナルの拡大に対抗するため、民主主義諸国による同盟「連合国」が結成されました。`, "log-war");
-            showEventModal({
-                title: "連合国 結成",
-                category: "国際同盟ブロック",
-                icon: "🛡️",
-                description: "インターナショナルの台頭と勢力拡大に対抗するため、世界の自由主義・民主主義国家が一致団結。「連合国」が結成されました。",
-                details: `主導国: ${leader.name} | 加盟条件: 民主主義体制`,
-                themeColor: "#4d91ff",
-                themeGlow: "rgba(77, 145, 255, 0.4)",
-                themeBg: "rgba(77, 145, 255, 0.12)"
-            });
+            if (!hasShownAlliedNationsModal) {
+                hasShownAlliedNationsModal = true;
+                showEventModal({
+                    title: "連合国 結成",
+                    category: "国際同盟ブロック",
+                    icon: "🛡️",
+                    description: "インターナショナルの台頭と勢力拡大に対抗するため、世界の自由主義・民主主義国家が一致団結。「連合国」が結成されました。",
+                    details: `主導国: ${leader.name} | 加盟条件: 民主主義体制`,
+                    themeColor: "#4d91ff",
+                    themeGlow: "rgba(77, 145, 255, 0.4)",
+                    themeBg: "rgba(77, 145, 255, 0.12)"
+                });
+            }
         }
 
         // 加入
@@ -6752,6 +6816,14 @@ function manageAlliedNations() {
                     }
                 });
                 log(`${n.name}が連合国に加入しました。`, "log-peace");
+            }
+        });
+
+        // 連合国加盟国を寒色系（青・水色系）に統一
+        alliedNations.members.forEach(mId => {
+            const m = nations.find(nat => nat.id === mId);
+            if (m && !isCoolColor(m.color)) {
+                m.color = getCoolColor();
             }
         });
     } else if (alliedNationsId !== -1) {
@@ -7188,7 +7260,7 @@ function saveGame() {
         hegemonId, hegemonStatus, highTensionDuration,
         isDemocracyAwakened, isSocialismSprouted,
         internationalAllianceId, internationalVersion,
-        alliedNationsId,
+        alliedNationsId, hasShownAlliedNationsModal,
         isSpecialAlliancesEnabled,
         frameCounter, simSpeed,
         concertDuration,
@@ -7242,6 +7314,7 @@ function loadGame(file) {
             internationalAllianceId = data.internationalAllianceId !== undefined ? data.internationalAllianceId : -1;
             internationalVersion = data.internationalVersion || 1;
             alliedNationsId = data.alliedNationsId !== undefined ? data.alliedNationsId : -1;
+            hasShownAlliedNationsModal = data.hasShownAlliedNationsModal || false;
             isSpecialAlliancesEnabled = data.isSpecialAlliancesEnabled !== undefined ? data.isSpecialAlliancesEnabled : true;
             frameCounter = data.frameCounter;
             simSpeed = data.simSpeed;
