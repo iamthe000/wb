@@ -4996,55 +4996,67 @@ function simulateTick() {
         
         handlePolitics(n);
 
-        // 未開拓地の植民
-        const colonizationChance = 0.01 + (n.tech * 0.02); // 1% to 9% depending on tech
+        // 未開拓地の植民 (技術力・国力に応じて開拓スピードが向上)
+        const gdpBonus = Math.min(0.08, (n.gdp / 5000) * 0.02);
+        const industryBonus = Math.min(0.05, (n.industry / 200) * 0.01);
+        const colonizationChance = 0.01 + (n.tech * 0.02) + gdpBonus + industryBonus; // 技術+国力で最大約22%
         if (n.tech >= 1 && Math.random() < colonizationChance) { 
-            // ランダムに領土をピックして、隣接する未開拓地(ownerGrid == -1)を探す
-            const sampleTiles = [];
-            for(let i=0; i<10; i++) {
-                if (n.tiles.length > 0) {
-                    sampleTiles.push(n.tiles[Math.floor(Math.random() * n.tiles.length)]);
-                }
-            }
-            
-            for(const tIdx of sampleTiles) {
-                const cx = tIdx % width;
-                const cy = Math.floor(tIdx / width);
-                let done = false;
-                
-                const neighbors = [[0,1],[0,-1],[1,0],[-1,0]];
-                // ランダムな順序で試す
-                neighbors.sort(() => Math.random() - 0.5);
+            // 国力・技術力が高い国は1ターンに最大複数マス開拓可能
+            const maxTilesPerTurn = Math.min(3, 1 + Math.floor(n.tech / 2) + (n.gdp > 1000 ? 1 : 0));
+            let tilesColonized = 0;
 
-                for(const [dx, dy] of neighbors) {
-                    let nx=cx+dx, ny=cy+dy;
-                    if(nx>=0 && nx<width && ny>=0 && ny<height) {
-                        let nIdx = ny*width+nx;
-                        if(ownerGrid[nIdx] === -1 && (grid[nIdx] === 1 || grid[nIdx] === 2)) { // 未所属の陸地または山岳
-                            ownerGrid[nIdx] = n.id;
-                            n.tiles.push(nIdx);
-                            // コスト
-                            n.gdp = Math.max(0, n.gdp - 5);
-                            done = true;
-                            break;
+            for (let step = 0; step < maxTilesPerTurn; step++) {
+                const sampleTiles = [];
+                for(let i=0; i<10; i++) {
+                    if (n.tiles.length > 0) {
+                        sampleTiles.push(n.tiles[Math.floor(Math.random() * n.tiles.length)]);
+                    }
+                }
+                
+                let stepDone = false;
+                for(const tIdx of sampleTiles) {
+                    const cx = tIdx % width;
+                    const cy = Math.floor(tIdx / width);
+                    
+                    const neighbors = [[0,1],[0,-1],[1,0],[-1,0]];
+                    // ランダムな順序で試す
+                    neighbors.sort(() => Math.random() - 0.5);
+
+                    for(const [dx, dy] of neighbors) {
+                        let nx=cx+dx, ny=cy+dy;
+                        if(nx>=0 && nx<width && ny>=0 && ny<height) {
+                            let nIdx = ny*width+nx;
+                            if(ownerGrid[nIdx] === -1 && (grid[nIdx] === 1 || grid[nIdx] === 2)) { // 未所属の陸地または山岳
+                                ownerGrid[nIdx] = n.id;
+                                n.tiles.push(nIdx);
+                                n.gdp = Math.max(0, n.gdp - 5);
+                                stepDone = true;
+                                tilesColonized++;
+                                break;
+                            }
                         }
                     }
-                }
 
-                // 陸上での拡大ができなかった場合、海を越えた未開拓地への植民（海軍力がある程度必要）
-                if (!done && n.ships >= 5) {
-                    const maxDist = Math.min(10, 3 + Math.floor(n.ships / 3));
-                    const seaIdx = findUnclaimedLandAcrossSea(tIdx, maxDist);
-                    if (seaIdx !== -1) {
-                        ownerGrid[seaIdx] = n.id;
-                        n.tiles.push(seaIdx);
-                        n.gdp = Math.max(0, n.gdp - 10); // 海を越えるための追加コスト
-                        log(`入植: ${n.name}は海軍力（船数: ${n.ships}）を活かして、海を越えた未開拓地に入植しました。`, "log-info");
-                        done = true;
+                    // 陸上での拡大ができなかった場合、海を越えた未開拓地への植民（海軍力がある程度必要）
+                    if (!stepDone && n.ships >= 5) {
+                        const maxDist = Math.min(10, 3 + Math.floor(n.ships / 3));
+                        const seaIdx = findUnclaimedLandAcrossSea(tIdx, maxDist);
+                        if (seaIdx !== -1) {
+                            ownerGrid[seaIdx] = n.id;
+                            n.tiles.push(seaIdx);
+                            n.gdp = Math.max(0, n.gdp - 10); // 海を越えるための追加コスト
+                            log(`入植: ${n.name}は海軍力（船数: ${n.ships}）を活かして、海を越えた未開拓地に入植しました。`, "log-info");
+                            stepDone = true;
+                            tilesColonized++;
+                        }
                     }
-                }
 
-                if(done) break;
+                    if(stepDone) break;
+                }
+                if (!stepDone) break;
+            }
+            if (tilesColonized > 0) {
+                n.updateCentroid();
             }
         }
 
