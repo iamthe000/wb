@@ -149,7 +149,7 @@
                     <option value="MEGA_NATIONS">大規模国家モード</option>
                 </select>
             </div>
-            <button id="btn-special-alliances-menu">インターナショナルと連合国: オン</button>
+            <button id="btn-game-rules-menu">ゲームルール設定</button>
             <button id="btn-fill">塗りつぶしモード: オフ</button>
             <button id="btn-generate">世界を生成 (シミュレーション開始)</button>
             <hr style="border: 0; border-top: 1px solid var(--border-color); margin:15px 0;">
@@ -171,7 +171,7 @@
                 <button id="btn-brush-sim" style="width:100%;">ブラシ: 陸地</button>
                 <button id="btn-fill-sim" style="width:100%; margin-top: 8px;">塗りつぶしモード: オフ</button>
             </div>
-            <button id="btn-special-alliances">インターナショナルと連合国: オン</button>
+            <button id="btn-game-rules">ゲームルール設定</button>
             <hr style="border: 0; border-top: 1px solid var(--border-color); margin:15px 0;">
             <button id="btn-save" style="margin-bottom:5px;">💾 セーブ (.terl)</button>
             <button id="btn-load-sim">📂 ロード (.terl)</button>
@@ -222,6 +222,28 @@
         
         <button id="btn-rulebook" style="margin-top: auto;">📖 ルールブック / システム解説</button>
     </div>
+</div>
+
+<!-- Game Rules Modal -->
+<div id="game-rules-modal" class="custom-modal" style="display:none; width:90%; max-width:480px;">
+    <h2>ゲームルール設定</h2>
+    <div style="display: flex; flex-direction: column; gap: 16px; margin: 16px 0;">
+        <div style="display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; background: var(--bg-input); border-radius: 6px; border: 1px solid var(--border-color);">
+            <div>
+                <div style="font-weight: bold; font-size: 0.9em;">イベントモーダル通知</div>
+                <div style="font-size: 0.75em; color: var(--text-secondary);">歴史的転換点や結成イベントなどのポップアップ表示</div>
+            </div>
+            <button id="btn-toggle-event-modal" style="width: auto; min-width: 80px; margin: 0; padding: 6px 12px;">オン</button>
+        </div>
+        <div style="display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; background: var(--bg-input); border-radius: 6px; border: 1px solid var(--border-color);">
+            <div>
+                <div style="font-weight: bold; font-size: 0.9em;">連合国・インターナショナル</div>
+                <div style="font-size: 0.75em; color: var(--text-secondary);">イデオロギー特有の特殊同盟ブロックの結成</div>
+            </div>
+            <button id="btn-toggle-special-alliances" style="width: auto; min-width: 80px; margin: 0; padding: 6px 12px;">オン</button>
+        </div>
+    </div>
+    <button onclick="document.getElementById('game-rules-modal').style.display='none'" style="width: 100%;">閉じる</button>
 </div>
 
 <!-- Custom Event Modal -->
