@@ -204,6 +204,7 @@ let isUnitedNationsEstablished = false;
 
 let concertDuration = 0;
 let concertMembers = []; // List of great power nation IDs in the concert
+let isWorldUnified = false;
 
 function getGreatPowers() {
     // Sort active, independent, non-puppet nations by their total power score.
@@ -398,6 +399,7 @@ function initGrid(size) {
     isSocialismDefeated = false;
     hasHadDemocracy = false;
     hasHadSocialism = false;
+    isWorldUnified = false;
     isDrawing = true;
     year = 1;
     document.getElementById('log').innerHTML = '';
@@ -4909,6 +4911,24 @@ function simulateTick() {
         });
     }
 
+    // 世界統一の達成イベントのチェック
+    if (!isWorldUnified && livingNations.length === 1) {
+        isWorldUnified = true;
+        const unifiedNation = livingNations[0];
+        unifiedNation.addHistory("世界統一を達成");
+        log(`歴史的偉業: 「${unifiedNation.name}」によって世界統一が達成されました！`, "log-peace");
+        showEventModal({
+            title: "世界統一の達成",
+            category: "歴史的偉業",
+            icon: "👑",
+            description: `「${unifiedNation.name}」が世界に存在するすべての国家を統合し、全陸地を統治下に収めました。長きにわたる戦乱と紛争の歴史は終わりを告げ、地球上に唯一無二の大帝国・統一秩序が誕生しました。`,
+            details: `達成年: 第${year}年 | 統一国家: ${unifiedNation.name}`,
+            themeColor: "#f1c40f",
+            themeGlow: "rgba(241, 196, 15, 0.5)",
+            themeBg: "rgba(241, 196, 15, 0.15)"
+        });
+    }
+
     updateMilitaryGrid();
     if (mapDirty) {
         updateContinents();
@@ -7342,6 +7362,7 @@ function saveGame() {
         isDemocracyAwakened, isSocialismSprouted,
         isDemocracyDefeated, isSocialismDefeated,
         hasHadDemocracy, hasHadSocialism,
+        isWorldUnified,
         internationalAllianceId, internationalVersion,
         alliedNationsId, hasShownAlliedNationsModal,
         isSpecialAlliancesEnabled,
@@ -7398,6 +7419,7 @@ function loadGame(file) {
             isSocialismDefeated = data.isSocialismDefeated || false;
             hasHadDemocracy = data.hasHadDemocracy || false;
             hasHadSocialism = data.hasHadSocialism || false;
+            isWorldUnified = data.isWorldUnified || false;
             internationalAllianceId = data.internationalAllianceId !== undefined ? data.internationalAllianceId : -1;
             internationalVersion = data.internationalVersion || 1;
             alliedNationsId = data.alliedNationsId !== undefined ? data.alliedNationsId : -1;
