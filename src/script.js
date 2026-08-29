@@ -4359,16 +4359,6 @@ function triggerImperialCollapse(n) {
 
     log(collapseMsg, "log-war");
     n.addHistory(`滅亡: 指導者交代に伴う国家崩壊`);
-    showEventModal({
-        title: n.isSocialist() ? "体制崩壊" : "帝国崩壊",
-        category: "歴史的大変動",
-        icon: "💥",
-        description: collapseMsg,
-        details: `元国家: ${n.name} | 領土規模: ${n.tiles.length}タイル`,
-        themeColor: "#ff9900",
-        themeGlow: "rgba(255, 153, 0, 0.5)",
-        themeBg: "rgba(255, 153, 0, 0.15)"
-    });
 
     // Determine split centers
     let centers = [];
@@ -4948,16 +4938,6 @@ function simulateTick() {
                 
                 worldTension = Math.max(0, worldTension - 20); // 緊張度の緩和
                 log(`【大国協調発足】急激な国際緊張に対抗し、主要大国（${gps.map(g => g.name).join('、')}）は世界の秩序と安定を回復するため「大国協調体制」を組織しました。`, "log-peace");
-                showEventModal({
-                    title: "大国協調体制発足",
-                    category: "国際秩序",
-                    icon: "⚖️",
-                    description: "急激な世界緊張の高まりを受け、主要大国が結集。戦争の拡大を抑止し世界秩序を安定させるため「大国協調体制」が発足しました。",
-                    details: `加盟大国: ${gps.map(g => g.name).join('、')} | 予定期間: ${concertDuration}年間`,
-                    themeColor: "#4db8ff",
-                    themeGlow: "rgba(77, 184, 255, 0.4)",
-                    themeBg: "rgba(77, 184, 255, 0.12)"
-                });
             }
         }
     }
