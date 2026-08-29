@@ -4359,6 +4359,16 @@ function triggerImperialCollapse(n) {
 
     log(collapseMsg, "log-war");
     n.addHistory(`滅亡: 指導者交代に伴う国家崩壊`);
+    showEventModal({
+        title: n.isSocialist() ? "体制崩壊" : "帝国崩壊",
+        category: "歴史的大変動",
+        icon: "💥",
+        description: collapseMsg,
+        details: `元国家: ${n.name} | 領土規模: ${n.tiles.length}タイル`,
+        themeColor: "#ff9900",
+        themeGlow: "rgba(255, 153, 0, 0.5)",
+        themeBg: "rgba(255, 153, 0, 0.15)"
+    });
 
     // Determine split centers
     let centers = [];
@@ -4793,6 +4803,16 @@ function simulateTick() {
         if (maxTech >= 2 || year >= 1700) {
             isDemocracyAwakened = true;
             log("歴史的転換点: 「民主主義の目覚め」！ 民衆が自らの権利を主張し始め、共和制や立憲君主制の思想が広まりました。", "log-peace");
+            showEventModal({
+                title: "民主主義の目覚め",
+                category: "思想の誕生",
+                icon: "🏛️",
+                description: "民衆が自らの権利と自由を主張し始めました。絶対的な支配から解き放たれ、国民が主権を握る共和制や立憲君主制の思想が世界各地へ広まりつつあります。",
+                details: `発生年: 第${year}年 | 解放: 民主主義政治体制・立憲君主制`,
+                themeColor: "#00f0ff",
+                themeGlow: "rgba(0, 240, 255, 0.4)",
+                themeBg: "rgba(0, 240, 255, 0.12)"
+            });
         }
     }
 
@@ -4803,6 +4823,16 @@ function simulateTick() {
         if (maxTech >= 2 || year >= 1848) {
             isSocialismSprouted = true;
             log("歴史的転換点: 「社会主義の芽生え」！ 工業化の進展と共に労働者が団結し、社会主義・共産主義の思想が広まり始めました。", "log-peace");
+            showEventModal({
+                title: "社会主義の芽生え",
+                category: "思想の誕生",
+                icon: "🚩",
+                description: "工業化の進展と共に労働者が団結を強化。生産手段の社会化と平等を掲げる社会主義・共産主義の思想が大きな波となって世界を揺るがし始めています。",
+                details: `発生年: 第${year}年 | 解放: 前衛党独裁・計画経済体制`,
+                themeColor: "#ff3b30",
+                themeGlow: "rgba(255, 59, 48, 0.4)",
+                themeBg: "rgba(255, 59, 48, 0.15)"
+            });
         }
     }
 
@@ -4858,7 +4888,7 @@ function simulateTick() {
         }
         
         if (shouldCollapse) {
-            log(`【大国協調崩壊】${collapseReason}により、大国協調体制（ウィーン体制）は崩壊しました。世界は再び戦乱の混沌に包まれます。`, "log-war");
+            log(`【大国協調崩壊】${collapseReason}により、大国協調体制は崩壊しました。世界は再び戦乱の混沌に包まれます。`, "log-war");
             concertDuration = 0;
             concertMembers = [];
         } else {
@@ -4890,7 +4920,7 @@ function simulateTick() {
             }
             
             if (concertDuration === 0) {
-                log("【大国協調終結】合意期限が満了したため、大国協調体制（ウィーン体制）は円満に終了しました。平和な一時が終わり、再び動乱の時代へ向かいます。", "log-info");
+                log("【大国協調終結】合意期限が満了したため、大国協調体制は円満に終了しました。平和な一時が終わり、再び動乱の時代へ向かいます。", "log-info");
                 concertMembers = [];
             }
         }
@@ -4917,7 +4947,17 @@ function simulateTick() {
                 }
                 
                 worldTension = Math.max(0, worldTension - 20); // 緊張度の緩和
-                log(`【大国協調発足】急激な国際緊張に対抗し、主要大国（${gps.map(g => g.name).join('、')}）は世界の秩序と安定を回復するため「大国協調体制（ウィーン体制）」を組織しました。`, "log-peace");
+                log(`【大国協調発足】急激な国際緊張に対抗し、主要大国（${gps.map(g => g.name).join('、')}）は世界の秩序と安定を回復するため「大国協調体制」を組織しました。`, "log-peace");
+                showEventModal({
+                    title: "大国協調体制発足",
+                    category: "国際秩序",
+                    icon: "⚖️",
+                    description: "急激な世界緊張の高まりを受け、主要大国が結集。戦争の拡大を抑止し世界秩序を安定させるため「大国協調体制」が発足しました。",
+                    details: `加盟大国: ${gps.map(g => g.name).join('、')} | 予定期間: ${concertDuration}年間`,
+                    themeColor: "#4db8ff",
+                    themeGlow: "rgba(77, 184, 255, 0.4)",
+                    themeBg: "rgba(77, 184, 255, 0.12)"
+                });
             }
         }
     }
@@ -5903,6 +5943,16 @@ function establishUnitedNations() {
     const host = getGreatPowers()[0] || memberNations[0];
     const hostName = host ? host.name : "世界各国";
     log(`【世界平和の達成】${hostName}で国連憲章が調印され、国際連合が結成された。`, "log-peace");
+    showEventModal({
+        title: "国際連合 結成",
+        category: "世界秩序の樹立",
+        icon: "🌐",
+        description: `過酷な大戦の試練を乗り越え、${hostName}にて国連憲章が調印されました。世界恒久平和の実現を目指す国際連合（UN）が正式に結成されました。`,
+        details: `加盟国数: ${memberNations.length}カ国 | 憲章調印国: ${hostName}`,
+        themeColor: "#38bdf8",
+        themeGlow: "rgba(56, 189, 248, 0.4)",
+        themeBg: "rgba(56, 189, 248, 0.12)"
+    });
     isUnitedNationsEstablished = true;
 }
 
@@ -6593,6 +6643,16 @@ function manageTheInternational() {
         internationalAllianceId = international.id;
         leader.allianceId = international.id;
         log(`万国の労働者よ、団結せよ！ 社会主義国家による同盟「${name}」が結成されました。`, "log-war");
+        showEventModal({
+            title: `${name} 結成`,
+            category: "国際同盟ブロック",
+            icon: "☭",
+            description: "「万国の労働者よ、団結せよ！」社会主義・共産主義を掲げる主権国家が結集し、世界革命と相互防衛のための国際同盟を結成しました。",
+            details: `主導国: ${leader.name} | 加盟条件: 全体主義・計画統制経済`,
+            themeColor: "#ff2a2a",
+            themeGlow: "rgba(255, 42, 42, 0.5)",
+            themeBg: "rgba(255, 42, 42, 0.15)"
+        });
     }
 
     // 加入漏れの社会主義国を招待
@@ -6677,6 +6737,16 @@ function manageAlliedNations() {
             alliances.push(alliedNations);
             alliedNationsId = alliedNations.id;
             log(`自由主義の危機！ インターナショナルの拡大に対抗するため、民主主義諸国による同盟「連合国」が結成されました。`, "log-war");
+            showEventModal({
+                title: "連合国 結成",
+                category: "国際同盟ブロック",
+                icon: "🛡️",
+                description: "インターナショナルの台頭と勢力拡大に対抗するため、世界の自由主義・民主主義国家が一致団結。「連合国」が結成されました。",
+                details: `主導国: ${leader.name} | 加盟条件: 民主主義体制`,
+                themeColor: "#4d91ff",
+                themeGlow: "rgba(77, 145, 255, 0.4)",
+                themeBg: "rgba(77, 145, 255, 0.12)"
+            });
         }
 
         // 加入
@@ -7264,6 +7334,49 @@ function populateSelect(id, options) {
         o.innerText = opt;
         el.appendChild(o);
     });
+}
+
+function showEventModal(config) {
+    const modal = document.getElementById('event-modal');
+    if (!modal) return;
+
+    // Set badge / icon / category
+    const iconEl = document.getElementById('event-modal-icon');
+    const catEl = document.getElementById('event-modal-category');
+    const titleEl = document.getElementById('event-modal-title');
+    const descEl = document.getElementById('event-modal-desc');
+    const detailsEl = document.getElementById('event-modal-details');
+
+    if (iconEl) iconEl.innerText = config.icon || '📜';
+    if (catEl) catEl.innerText = config.category || '歴史的出来事';
+    if (titleEl) titleEl.innerText = config.title || '歴史的転換点';
+    if (descEl) descEl.innerText = config.description || '';
+
+    if (detailsEl) {
+        if (config.details) {
+            detailsEl.innerText = config.details;
+            detailsEl.style.display = 'block';
+        } else {
+            detailsEl.style.display = 'none';
+        }
+    }
+
+    // Set theme custom properties
+    modal.style.setProperty('--event-theme-color', config.themeColor || 'var(--color-primary)');
+    modal.style.setProperty('--event-theme-glow', config.themeGlow || 'rgba(0, 240, 255, 0.4)');
+    modal.style.setProperty('--event-theme-bg', config.themeBg || 'rgba(0, 240, 255, 0.12)');
+
+    // Auto-pause simulation so the user can read the event modal
+    isPaused = true;
+
+    modal.style.display = 'block';
+}
+
+function closeEventModal() {
+    const modal = document.getElementById('event-modal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
 }
 
 function openEditNationModal() {
