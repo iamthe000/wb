@@ -6774,13 +6774,26 @@ function manageTheInternational() {
         (n.sysDetailed === '前衛党独裁' || (n.ecoIdeology && (n.ecoIdeology.includes('計画') || n.ecoIdeology.includes('統制')) && n.sysBroad === '全体主義'))
     );
 
-    if (socialistNations.length < 2) {
-        // 1カ国以下ならインターナショナルは維持されない（既存があれば解散チェックはしないが）
-        return;
-    }
-
     // インターナショナル同盟の存在チェック
     let international = alliances.find(a => a.id === internationalAllianceId);
+
+    if (socialistNations.length < 2) {
+        // 1カ国以下ならインターナショナルは維持されないため解散
+        if (international) {
+            international.members.forEach(mId => {
+                const m = nations.find(nat => nat.id === mId);
+                if (m) {
+                    if (m.allianceId === international.id) m.allianceId = -1;
+                    m.allies = m.allies.filter(aId => !international.members.includes(aId));
+                }
+            });
+            alliances = alliances.filter(a => a.id !== international.id);
+            log(`${international.name}は解散しました。`, "log-info");
+            internationalAllianceId = -1;
+            internationalVersion++;
+        }
+        return;
+    }
 
     if (!international) {
         // 新規作成
@@ -6836,15 +6849,25 @@ function manageTheInternational() {
         }
     });
 
-    // 死んだ国の除外は Alliance クラスや既存ロジックで概ね処理されるが、
-    // インターナショナル自体が崩壊（全滅）した場合のケア
-    if (international.members.every(mId => {
+    // メンバーのクリーンアップ（死亡した国や社会主義でなくなった国を除外）
+    international.members = international.members.filter(mId => {
         const m = nations.find(nat => nat.id === mId);
-        return !m || m.isDead;
-    })) {
+        return m && !m.isDead && socialistNations.some(sn => sn.id === mId);
+    });
+
+    // 生存する社会主義加盟国が2カ国未満になった場合、インターナショナルは解散
+    if (international.members.length < 2) {
+        international.members.forEach(mId => {
+            const m = nations.find(nat => nat.id === mId);
+            if (m) {
+                m.allianceId = -1;
+                m.allies = m.allies.filter(aId => !international.members.includes(aId));
+            }
+        });
         internationalAllianceId = -1;
         internationalVersion++;
         alliances = alliances.filter(a => a.id !== international.id);
+        log(`${international.name}は勢力を失い、解散しました。`, "log-info");
     }
 }
 
@@ -6940,6 +6963,12 @@ function manageAlliedNations() {
             if (m && !isCoolColor(m.color)) {
                 m.color = getCoolColor();
             }
+        });
+
+        // メンバーのクリーンアップ（死亡した国や民主主義でなくなった国を除外）
+        alliedNations.members = alliedNations.members.filter(mId => {
+            const m = nations.find(nat => nat.id === mId);
+            return m && !m.isDead && democraticNations.some(dn => dn.id === mId);
         });
     } else if (alliedNationsId !== -1) {
         // インターナショナルの脅威が去った、または民主主義国が減った場合は解散
