@@ -190,6 +190,7 @@ let hasHadDemocracy = false;
 let hasHadSocialism = false;
 let internationalAllianceId = -1;
 let internationalVersion = 1;
+let hasShownInternationalModal = false;
 let alliedNationsId = -1;
 let hasShownAlliedNationsModal = false;
 let isSpecialAlliancesEnabled = true;
@@ -395,6 +396,7 @@ function initGrid(size) {
     worldTension = 0;
     hasExperiencedHighWorldTension = false;
     isUnitedNationsEstablished = false;
+    hasShownInternationalModal = false;
     hasShownAlliedNationsModal = false;
     isDemocracyDefeated = false;
     isSocialismDefeated = false;
@@ -6804,16 +6806,19 @@ function manageTheInternational() {
         internationalAllianceId = international.id;
         leader.allianceId = international.id;
         log(`万国の労働者よ、団結せよ！ 社会主義国家による同盟「${name}」が結成されました。`, "log-war");
-        showEventModal({
-            title: `${name} 結成`,
-            category: "国際同盟ブロック",
-            icon: "☭",
-            description: "「万国の労働者よ、団結せよ！」社会主義・共産主義を掲げる主権国家が結集し、世界革命と相互防衛のための国際同盟を結成しました。",
-            details: `主導国: ${leader.name} | 加盟条件: 全体主義・計画統制経済`,
-            themeColor: "#ff2a2a",
-            themeGlow: "rgba(255, 42, 42, 0.5)",
-            themeBg: "rgba(255, 42, 42, 0.15)"
-        });
+        if (!hasShownInternationalModal) {
+            hasShownInternationalModal = true;
+            showEventModal({
+                title: `${name} 結成`,
+                category: "国際同盟ブロック",
+                icon: "☭",
+                description: "「万国の労働者よ、団結せよ！」社会主義・共産主義を掲げる主権国家が結集し、世界革命と相互防衛のための国際同盟を結成しました。",
+                details: `主導国: ${leader.name} | 加盟条件: 全体主義・計画統制経済`,
+                themeColor: "#ff2a2a",
+                themeGlow: "rgba(255, 42, 42, 0.5)",
+                themeBg: "rgba(255, 42, 42, 0.15)"
+            });
+        }
     }
 
     // 加入漏れの社会主義国を招待
@@ -7406,7 +7411,7 @@ function saveGame() {
         isDemocracyDefeated, isSocialismDefeated,
         hasHadDemocracy, hasHadSocialism,
         isWorldUnified,
-        internationalAllianceId, internationalVersion,
+        internationalAllianceId, internationalVersion, hasShownInternationalModal,
         alliedNationsId, hasShownAlliedNationsModal,
         isSpecialAlliancesEnabled, isEventModalEnabled,
         frameCounter, simSpeed,
@@ -7465,6 +7470,7 @@ function loadGame(file) {
             isWorldUnified = data.isWorldUnified || false;
             internationalAllianceId = data.internationalAllianceId !== undefined ? data.internationalAllianceId : -1;
             internationalVersion = data.internationalVersion || 1;
+            hasShownInternationalModal = data.hasShownInternationalModal || false;
             alliedNationsId = data.alliedNationsId !== undefined ? data.alliedNationsId : -1;
             hasShownAlliedNationsModal = data.hasShownAlliedNationsModal || false;
             isSpecialAlliancesEnabled = data.isSpecialAlliancesEnabled !== undefined ? data.isSpecialAlliancesEnabled : true;
