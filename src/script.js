@@ -208,6 +208,9 @@ let concertDuration = 0;
 let concertMembers = []; // List of great power nation IDs in the concert
 let isWorldUnified = false;
 
+let partitionPacts = [];
+let pactIdCounter = 0;
+
 function getGreatPowers() {
     // Sort active, independent, non-puppet nations by their total power score.
     const candidates = nations.filter(n => !n.isDead && !n.isPuppet);
@@ -403,6 +406,8 @@ function initGrid(size) {
     hasHadDemocracy = false;
     hasHadSocialism = false;
     isWorldUnified = false;
+    partitionPacts = [];
+    pactIdCounter = 0;
     isDrawing = true;
     year = 1;
     document.getElementById('log').innerHTML = '';
@@ -1080,8 +1085,10 @@ function renderAlliancesContent() {
     const content = document.getElementById('alliances-content');
     content.innerHTML = '';
 
-    if (alliances.length === 0 && organizations.length === 0) {
-        content.innerHTML = '<div style="color:#aaa; text-align:center; padding:20px;">現在、有効な同盟や国際機関はありません。</div>';
+    const activePacts = partitionPacts.filter(p => p.status === 'ACTIVE' || p.status === 'FULFILLED');
+
+    if (alliances.length === 0 && organizations.length === 0 && activePacts.length === 0) {
+        content.innerHTML = '<div style="color:#aaa; text-align:center; padding:20px;">現在、有効な同盟、国際機関、または秘密分割協定はありません。</div>';
         return;
     }
 
@@ -1140,6 +1147,40 @@ function renderAlliancesContent() {
             orgSection.appendChild(div);
         });
         content.appendChild(orgSection);
+    }
+
+    if (activePacts.length > 0) {
+        const pactSection = document.createElement('div');
+        pactSection.innerHTML = '<h3 class="ranking-section-title">秘密分割協定</h3>';
+        activePacts.slice(-5).reverse().forEach(p => {
+            const inv1 = nations.find(n => n.id === p.invader1Id);
+            const inv2 = nations.find(n => n.id === p.invader2Id);
+            const target = nations.find(n => n.id === p.targetId);
+
+            const inv1Name = inv1 ? `<span style="color:${inv1.color}">${inv1.name}</span>` : "不明";
+            const inv2Name = inv2 ? `<span style="color:${inv2.color}">${inv2.name}</span>` : "不明";
+            const targetName = target ? `<span style="color:${target.color}">${target.name}</span>` : "不明";
+
+            const statusText = p.status === 'ACTIVE' 
+                ? '<span style="color:#ff3b30;">[共同侵攻進行中]</span>' 
+                : '<span style="color:#2ecc71;">[分割併合完了]</span>';
+
+            const div = document.createElement('div');
+            div.className = 'panel';
+            div.style.marginBottom = '10px';
+
+            div.innerHTML = `
+                <div style="font-weight:bold; color:#e67e22; font-size:1.05em; border-bottom:1px solid #444; margin-bottom:5px; padding-bottom:3px; display:flex; justify-content:space-between;">
+                    <span>${p.name}</span>
+                    <span>${statusText}</span>
+                </div>
+                <div style="font-size:0.85em; margin-bottom:3px;"><b>当事国 (侵攻陣営):</b> ${inv1Name} & ${inv2Name}</div>
+                <div style="font-size:0.85em; margin-bottom:3px;"><b>標的国:</b> ${targetName}</div>
+                <div style="font-size:0.75em; color:#aaa;">締結年: 第${p.signedYear}年</div>
+            `;
+            pactSection.appendChild(div);
+        });
+        content.appendChild(pactSection);
     }
 }
 
@@ -5281,6 +5322,9 @@ function simulateTick() {
     // 連合国（非社会主義・民主主義国家同盟）の管理
     manageAlliedNations();
 
+    // 分割協定（秘密協定・共同侵攻）の管理
+    managePartitionPacts();
+
     hegemonId = -1;
     let maxScore = -1;
     nations.forEach(n => {
@@ -6304,6 +6348,13 @@ function declareWar(n1, n2, isIntervention = false) {
 }
 
 function concludePeace(n1, n2, type) {
+    // 秘密分割協定の対象国が講和に入った場合、共同分割処理を優先実行
+    const activePact = partitionPacts.find(p => p.status === 'ACTIVE' && (p.targetId === n1.id || p.targetId === n2.id));
+    if (activePact) {
+        executePartition(activePact);
+        return;
+    }
+
     // Determine winner/loser if applicable
     let winner = n1, loser = n2;
     if (n2.getMilitaryPower() > n1.getMilitaryPower()) {
@@ -6764,6 +6815,208 @@ function getCoolColor() {
 
 function makePeace(n1, n2) {
     concludePeace(n1, n2, 'DEFAULT');
+}
+
+function managePartitionPacts() {
+    if (activeScenario === 'GRACEFUL_US' || activeScenario === 'TOTALLER_KRIEG') return;
+
+    // 1. アクティブな協定の監視と状況更新
+    partitionPacts.forEach(pact => {
+        if (pact.status !== 'ACTIVE') return;
+        const inv1 = nations.find(n => n.id === pact.invader1Id);
+        const inv2 = nations.find(n => n.id === pact.invader2Id);
+        const target = nations.find(n => n.id === pact.targetId);
+
+        if (!inv1 || inv1.isDead || !inv2 || inv2.isDead || !target || target.isDead) {
+            pact.status = 'CANCELLED';
+            return;
+        }
+
+        // 侵攻国同士が戦争状態になった場合、協定は破棄
+        if (inv1.atWarWith.includes(inv2.id)) {
+            pact.status = 'CANCELLED';
+            log(`秘密協定破棄: ${inv1.name}と${inv2.name}が交戦状態に入ったため、${pact.name}は破棄されました。`, "log-war");
+            return;
+        }
+
+        // 標的国の領土が失われた場合
+        if (target.tiles.length === 0) {
+            pact.status = 'FULFILLED';
+            return;
+        }
+
+        // 共同侵攻による戦局悪化・降伏判定（安定度の低下、極端な戦力差、長期化）
+        const jointWarDuration = Math.max(getWarDuration(inv1, target), getWarDuration(inv2, target));
+        const targetPower = target.getMilitaryPower();
+        const combinedInvaderPower = inv1.getMilitaryPower() + inv2.getMilitaryPower();
+
+        if (target.stability < 30 || targetPower < combinedInvaderPower * 0.2 || jointWarDuration >= 15 || target.tiles.length < 10) {
+            executePartition(pact);
+        }
+    });
+
+    // 2. 新たな秘密分割協定の結成判定
+    if (Math.random() > 0.05) return; // 判定頻度制御
+
+    const livingNations = nations.filter(n => !n.isDead && !n.isPuppet);
+    if (livingNations.length < 3) return;
+
+    for (let i = 0; i < livingNations.length; i++) {
+        const target = livingNations[i];
+        if (target.tiles.length === 0) continue;
+
+        // 既に分割協定の標的になっている場合はスキップ
+        if (partitionPacts.some(p => p.status === 'ACTIVE' && p.targetId === target.id)) continue;
+
+        // 標的国に隣接し、標的国と不仲（関係 < 30）な独立国を探索
+        const neighborsOfTarget = livingNations.filter(n => 
+            n.id !== target.id && 
+            isNeighbor(n, target) && 
+            (n.relations[target.id] || 0) < 30 &&
+            !n.atWarWith.includes(target.id)
+        );
+
+        if (neighborsOfTarget.length < 2) continue;
+
+        // 標的国の隣接国の中から、互いに非敵対（関係 >= 0 または 同盟関係）なペアを探す
+        for (let j = 0; j < neighborsOfTarget.length; j++) {
+            for (let k = j + 1; k < neighborsOfTarget.length; k++) {
+                const inv1 = neighborsOfTarget[j];
+                const inv2 = neighborsOfTarget[k];
+
+                if (inv1.atWarWith.includes(inv2.id)) continue;
+                if ((inv1.relations[inv2.id] || 0) < 0 && !inv1.allies.includes(inv2.id)) continue;
+
+                // 両国とも標的国より軍事力または領土で優位（小規模な国をターゲットにする）
+                const tPow = target.getMilitaryPower();
+                const inv1Pow = inv1.getMilitaryPower();
+                const inv2Pow = inv2.getMilitaryPower();
+
+                const isTargetSmaller = (inv1Pow > tPow * 1.1 || inv1.tiles.length > target.tiles.length * 1.1) &&
+                                       (inv2Pow > tPow * 1.1 || inv2.tiles.length > target.tiles.length * 1.1);
+
+                if (!isTargetSmaller) continue;
+
+                // 秘密分割協定の締結
+                const isKanji = (inv1.cultureType === 'KANJI' || inv2.cultureType === 'KANJI');
+                const pactName = isKanji 
+                    ? `「${inv1.baseName}・${inv2.baseName}秘密協定」` 
+                    : `「${inv1.baseName}-${inv2.baseName} Secret Pact」`;
+
+                const pact = {
+                    id: pactIdCounter++,
+                    name: pactName,
+                    invader1Id: inv1.id,
+                    invader2Id: inv2.id,
+                    targetId: target.id,
+                    year: year,
+                    status: 'ACTIVE'
+                };
+
+                partitionPacts.push(pact);
+
+                // 共同宣戦布告
+                declareWar(inv1, target, true);
+                declareWar(inv2, target, true);
+
+                log(`【秘密協定】${inv1.name}と${inv2.name}は${target.name}を分割統治する${pactName}を締結し、共同侵攻を開始しました！`, "log-war");
+                inv1.addHistory(`秘密協定締結: ${inv2.name}と共同で${target.name}の分割侵攻を開始 (${pactName})`);
+                inv2.addHistory(`秘密協定締結: ${inv1.name}と共同で${target.name}の分割侵攻を開始 (${pactName})`);
+                target.addHistory(`秘密協定の標的: ${inv1.name}と${inv2.name}による共同侵攻 (${pactName})`);
+
+                return; // 1ターンにつき最大1つの協定結成
+            }
+        }
+    }
+}
+
+function executePartition(pact) {
+    if (pact.status !== 'ACTIVE') return;
+
+    const inv1 = nations.find(n => n.id === pact.invader1Id);
+    const inv2 = nations.find(n => n.id === pact.invader2Id);
+    const target = nations.find(n => n.id === pact.targetId);
+
+    if (!inv1 || inv1.isDead || !inv2 || inv2.isDead || !target || target.isDead) {
+        pact.status = 'CANCELLED';
+        return;
+    }
+
+    const targetTiles = [...target.tiles];
+    if (targetTiles.length === 0) {
+        pact.status = 'FULFILLED';
+        return;
+    }
+
+    // 各侵攻国の重心（位置）への距離に基づき領土を二分割 (Voronoi分割)
+    let inv1TilesCount = 0;
+    let inv2TilesCount = 0;
+
+    targetTiles.forEach(tileIdx => {
+        const x = tileIdx % width;
+        const y = Math.floor(tileIdx / width);
+
+        const dist1 = (x - inv1.visualCentroid.x) ** 2 + (y - inv1.visualCentroid.y) ** 2;
+        const dist2 = (x - inv2.visualCentroid.x) ** 2 + (y - inv2.visualCentroid.y) ** 2;
+
+        if (dist1 <= dist2) {
+            ownerGrid[tileIdx] = inv1.id;
+            inv1.tiles.push(tileIdx);
+            inv1TilesCount++;
+        } else {
+            ownerGrid[tileIdx] = inv2.id;
+            inv2.tiles.push(tileIdx);
+            inv2TilesCount++;
+        }
+    });
+
+    target.tiles = [];
+
+    // 都市の分割所有権の移譲
+    target.cities.forEach(city => {
+        const cityOwnerId = ownerGrid[city.tileIdx];
+        if (cityOwnerId === inv1.id) {
+            city.nationId = inv1.id;
+            inv1.cities.push(city);
+        } else if (cityOwnerId === inv2.id) {
+            city.nationId = inv2.id;
+            inv2.cities.push(city);
+        } else {
+            const cx = city.tileIdx % width;
+            const cy = Math.floor(city.tileIdx / width);
+            const d1 = (cx - inv1.visualCentroid.x) ** 2 + (cy - inv1.visualCentroid.y) ** 2;
+            const d2 = (cx - inv2.visualCentroid.x) ** 2 + (cy - inv2.visualCentroid.y) ** 2;
+            if (d1 <= d2) {
+                ownerGrid[city.tileIdx] = inv1.id;
+                city.nationId = inv1.id;
+                inv1.cities.push(city);
+            } else {
+                ownerGrid[city.tileIdx] = inv2.id;
+                city.nationId = inv2.id;
+                inv2.cities.push(city);
+            }
+        }
+    });
+    target.cities = [];
+
+    target.isDead = true;
+    target.pop = 0;
+
+    // 戦争状態の解除
+    inv1.atWarWith = inv1.atWarWith.filter(id => id !== target.id);
+    inv2.atWarWith = inv2.atWarWith.filter(id => id !== target.id);
+    if (inv1.warStartedAt) delete inv1.warStartedAt[target.id];
+    if (inv2.warStartedAt) delete inv2.warStartedAt[target.id];
+
+    pact.status = 'FULFILLED';
+
+    log(`【領土分割】${inv1.name}と${inv2.name}は${pact.name}に基づき、${target.name}の全領土を分割併合しました！`, "log-war");
+    inv1.addHistory(`領土分割完遂: ${pact.name}に基づき${target.name}を分割併合 (+${inv1TilesCount}タイル)`);
+    inv2.addHistory(`領土分割完遂: ${pact.name}に基づき${target.name}を分割併合 (+${inv2TilesCount}タイル)`);
+    target.addHistory(`国家消滅: ${inv1.name}と${inv2.name}の秘密協定により分割併合される`);
+
+    inv1.updateCentroid();
+    inv2.updateCentroid();
 }
 
 function manageTheInternational() {
@@ -7416,7 +7669,9 @@ function saveGame() {
         isSpecialAlliancesEnabled, isEventModalEnabled,
         frameCounter, simSpeed,
         concertDuration,
-        concertMembers
+        concertMembers,
+        partitionPacts,
+        pactIdCounter
     };
     
     const blob = new Blob([JSON.stringify(saveData)], {type: 'application/octet-stream'});
@@ -7480,6 +7735,8 @@ function loadGame(file) {
             
             concertDuration = data.concertDuration !== undefined ? data.concertDuration : 0;
             concertMembers = data.concertMembers || [];
+            partitionPacts = data.partitionPacts || [];
+            pactIdCounter = data.pactIdCounter || 0;
             
             // Rehydrate
             nations.forEach(n => {
