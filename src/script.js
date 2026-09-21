@@ -1904,6 +1904,8 @@ class Nation {
         this.megaCoreTiles = 0;
         // 初期首都周辺の本土。独立国である間は一部を維持する。
         this.megaHomelandTiles = [];
+        // 別大陸の内陸飛び地を売却した年。同じ外交イベントでの重複売却を防ぐ。
+        this.lastEnclaveSaleYear = -1;
         this.centroid = {x: 0, y: 0};
         this.visualCentroid = {x: 0, y: 0};
         this.visualAngle = 0;
@@ -4146,6 +4148,9 @@ function grantIndependence(n, city) {
         
         // 安定度少し回復（厄介払いができたため）
         n.stability = Math.min(100, n.stability + 5);
+
+        // 独立承認後、本国に残った別大陸の飛び地を近隣国へ整理売却する。
+        sellIsolatedEnclaves("独立承認");
     }
 }
 
@@ -6220,6 +6225,132 @@ function settleWarsAfterCoup(nation) {
     });
 }
 
+/**
+ * 本土から切り離され、別大陸の内陸に残った小さな飛び地を売却する。
+ *
+ * 飛び地は「同じ所有者のタイルでつながる連結成分」として扱う。
+ * 海岸に接している領土は植民地・海外領土として残し、周囲を他国に
+ * 囲まれた内陸の飛び地だけを対象にすることで、通常の海上領土を
+ * 毎回売ってしまわないようにしている。
+ */
+function sellIsolatedEnclaves(reason = "") {
+    if (activeScenario === 'TOTALLER_KRIEG') return;
+
+    const directions = [[0, 1], [0, -1], [1, 0], [-1, 0]];
+    const getNeighbors = (tileIdx) => {
+        const x = tileIdx % width;
+        const y = Math.floor(tileIdx / width);
+        return directions
+            .map(([dx, dy]) => {
+                const nx = x + dx;
+                const ny = y + dy;
+                return (nx >= 0 && nx < width && ny >= 0 && ny < height)
+                    ? ny * width + nx : -1;
+            })
+            .filter(idx => idx !== -1);
+    };
+
+    nations.filter(n => !n.isDead && n.tiles.length > 0).forEach(seller => {
+        // 同じ年に同じ国が何度も売却するのを防ぐ。
+        if (seller.lastEnclaveSaleYear === year) return;
+
+        const owned = new Set(seller.tiles);
+        const visited = new Set();
+        const components = [];
+
+        seller.tiles.forEach(start => {
+            if (visited.has(start)) return;
+            const component = [];
+            const queue = [start];
+            visited.add(start);
+            for (let head = 0; head < queue.length; head++) {
+                const tile = queue[head];
+                component.push(tile);
+                getNeighbors(tile).forEach(next => {
+                    if (owned.has(next) && !visited.has(next)) {
+                        visited.add(next);
+                        queue.push(next);
+                    }
+                });
+            }
+            components.push(component);
+        });
+
+        if (components.length < 2) return;
+
+        const capitalTile = seller.cities[0]?.tileIdx;
+        const mainComponent = components.find(c => c.includes(capitalTile))
+            || components.reduce((largest, current) => current.length > largest.length ? current : largest);
+        const mainTile = capitalTile ?? mainComponent[0];
+        const homeContinent = continentMap[mainTile];
+        const maxSmallSize = Math.max(4, Math.min(24, Math.floor(seller.tiles.length * 0.15)));
+
+        const candidates = components
+            .filter(component => component !== mainComponent && component.length <= maxSmallSize)
+            .filter(component => homeContinent !== -1 && continentMap[component[0]] !== homeContinent)
+            .map(component => {
+                const adjacentCounts = new Map();
+                let touchesWater = false;
+                component.forEach(tile => {
+                    getNeighbors(tile).forEach(next => {
+                        if (grid[next] === 0) {
+                            touchesWater = true;
+                        } else if (ownerGrid[next] !== seller.id && ownerGrid[next] !== -1) {
+                            adjacentCounts.set(ownerGrid[next], (adjacentCounts.get(ownerGrid[next]) || 0) + 1);
+                        }
+                    });
+                });
+                if (touchesWater || adjacentCounts.size === 0) return null;
+
+                const buyerId = [...adjacentCounts.entries()]
+                    .sort((a, b) => b[1] - a[1])[0][0];
+                const buyer = nations.find(n => n.id === buyerId && !n.isDead && n.id !== seller.id);
+                return buyer ? { component, buyer } : null;
+            })
+            .filter(Boolean);
+
+        // 一度の外交イベントで売るのは最大2区画。世界全体の領土が急変しすぎないようにする。
+        candidates.slice(0, 2).forEach(({ component, buyer }) => {
+            const transferred = new Set(component);
+            const area = component.length;
+            const price = Math.max(20, Math.round(area * (8 + seller.tech * 3)));
+            const populationTransfer = Math.min(
+                Math.floor(seller.pop * 0.08),
+                Math.max(0, Math.floor(area * 40))
+            );
+
+            seller.tiles = seller.tiles.filter(tile => !transferred.has(tile));
+            component.forEach(tile => {
+                ownerGrid[tile] = buyer.id;
+                if (!buyer.tiles.includes(tile)) buyer.tiles.push(tile);
+            });
+
+            seller.cities = seller.cities.filter(city => {
+                if (!transferred.has(city.tileIdx)) return true;
+                city.nationId = buyer.id;
+                buyer.cities.push(city);
+                return false;
+            });
+
+            // 売却益は売り手の国力に反映し、人口・土地は買い手へ移す。
+            seller.gdp += price;
+            seller.industry += Math.max(1, Math.floor(price / 80));
+            seller.stability = Math.min(100, seller.stability + 2);
+            seller.pop = Math.max(0, seller.pop - populationTransfer);
+            buyer.pop += populationTransfer;
+            buyer.industry += Math.max(1, Math.floor(area / 6));
+            seller.lastEnclaveSaleYear = year;
+
+            const context = reason ? `（${reason}）` : "";
+            log(`飛び地売却${context}: ${seller.name}は${buyer.name}に${area}タイルを譲渡し、売却益として国力が向上しました。`, "log-peace");
+            seller.addHistory(`飛び地売却: ${buyer.name}へ${area}タイル、国力 +${price}`);
+            buyer.addHistory(`領土購入: ${seller.name}から${area}タイルを取得`);
+        });
+
+        if (candidates.length > 0) mapDirty = true;
+    });
+}
+
 function getActiveWarTheaterCount() {
     const living = nations.filter(n => !n.isDead && n.atWarWith.length > 0);
     const visited = new Set();
@@ -6757,9 +6888,13 @@ function concludePeace(n1, n2, type) {
                 log(`戦勝国による処分: ${vassal.name}の宗主権が${winner.name}に移譲されました。`, "log-war");
             }
         });
+
     } else {
         log(`和平: ${n1.name}と${n2.name}が停戦合意しました。`, "log-peace");
     }
+
+    // どの講和条件でも、戦争で残った別大陸の内陸飛び地を近隣国へ売却する。
+    sellIsolatedEnclaves("講和");
 }
 
 function getHueFromColor(colorStr) {
