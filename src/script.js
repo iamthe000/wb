@@ -794,6 +794,33 @@ function setupInput() {
         openRelationsModal();
     });
 
+    document.getElementById('btn-command-attack').addEventListener('click', () => {
+        openCommandAttackModal();
+    });
+
+    document.getElementById('btn-command-attack-cancel').addEventListener('click', () => {
+        document.getElementById('command-attack-modal').style.display = 'none';
+    });
+
+    document.getElementById('btn-command-attack-confirm').addEventListener('click', () => {
+        const attacker = nations.find(nat => nat.id === selectedNationId);
+        const targetId = parseInt(document.getElementById('command-attack-target').value, 10);
+        const target = nations.find(nat => nat.id === targetId);
+        if (!attacker || !target || attacker.id === target.id || attacker.isDead || target.isDead) return;
+
+        if (attacker.atWarWith.includes(target.id)) {
+            log(`${attacker.name}と${target.name}はすでに交戦中です。`, "log-info");
+        } else {
+            // 手動命令なので、通常のAIの宣戦条件（関係・距離・大規模国家の戦域制限）を使わない。
+            attacker.relations[target.id] = -100;
+            target.relations[attacker.id] = -100;
+            declareWar(attacker, target, true, true);
+        }
+        document.getElementById('command-attack-modal').style.display = 'none';
+        updateNationPanel();
+        mapDirty = true;
+    });
+
     document.getElementById('btn-rulebook').addEventListener('click', () => {
         document.getElementById('rulebook-modal').style.display = 'block';
     });
@@ -1069,6 +1096,31 @@ function openRelationsModal() {
     });
 
     document.getElementById('relations-modal').style.display = 'block';
+}
+
+function openCommandAttackModal() {
+    if (selectedNationId === -1) return;
+    const attacker = nations.find(nat => nat.id === selectedNationId);
+    if (!attacker || attacker.isDead) return;
+
+    const targets = nations
+        .filter(target => target.id !== attacker.id && !target.isDead && !attacker.atWarWith.includes(target.id))
+        .sort((a, b) => a.name.localeCompare(b.name, 'ja'));
+    const select = document.getElementById('command-attack-target');
+    select.innerHTML = '';
+    targets.forEach(target => {
+        const option = document.createElement('option');
+        option.value = target.id;
+        option.textContent = target.name;
+        select.appendChild(option);
+    });
+
+    if (targets.length === 0) {
+        log(`${attacker.name}が攻撃できる国はありません。`, "log-info");
+        return;
+    }
+    document.getElementById('command-attack-description').textContent = `${attacker.name}に、どの国を攻撃させますか？`;
+    document.getElementById('command-attack-modal').style.display = 'block';
 }
 
 function openRankingModal() {
@@ -6385,18 +6437,18 @@ function canStartMegaNationWar(n1, n2) {
     return getActiveWarTheaterCount() < maxTheaters;
 }
 
-function declareWar(n1, n2, isIntervention = false) {
+function declareWar(n1, n2, isIntervention = false, force = false) {
     if (n1.id === n2.id) return;
     if (n1.isDead || n2.isDead) return;
 
     // 宗主国と傀儡国、および傀儡国同士は絶対に戦わない
-    if ((n1.isPuppet && n1.masterId === n2.id) || (n2.isPuppet && n2.masterId === n1.id)) return;
-    if (n1.isPuppet && n2.isPuppet && n1.masterId === n2.masterId && n1.masterId !== -1) return;
+    if (!force && ((n1.isPuppet && n1.masterId === n2.id) || (n2.isPuppet && n2.masterId === n1.id))) return;
+    if (!force && n1.isPuppet && n2.isPuppet && n1.masterId === n2.masterId && n1.masterId !== -1) return;
 
     // 大国協調体制（ウィーン体制）のメンバー同士は戦争しない
-    if (concertDuration > 0 && concertMembers.includes(n1.id) && concertMembers.includes(n2.id)) return;
+    if (!force && concertDuration > 0 && concertMembers.includes(n1.id) && concertMembers.includes(n2.id)) return;
 
-    if (!isIntervention && !canStartMegaNationWar(n1, n2)) return;
+    if (!force && !isIntervention && !canStartMegaNationWar(n1, n2)) return;
 
     if(n1.atWarWith.includes(n2.id)) return;
     n1.atWarWith.push(n2.id);
@@ -6409,6 +6461,7 @@ function declareWar(n1, n2, isIntervention = false) {
     log(`戦争: ${n1.name}が${n2.name}に宣戦布告しました！（緊張度: ${worldTension.toFixed(1)}%）`, "log-war");
     n1.addHistory(`宣戦布告: 対${n2.name}`);
     n2.addHistory(`宣戦布告される: ${n1.name}より`);
+    mapDirty = true;
 
     // 宗主国による防衛
     if (n2.isPuppet && n2.masterId !== -1) {
@@ -6479,13 +6532,6 @@ function declareWar(n1, n2, isIntervention = false) {
 }
 
 function concludePeace(n1, n2, type) {
-    // 秘密分割協定の対象国が講和に入った場合、共同分割処理を優先実行
-    const activePact = partitionPacts.find(p => p.status === 'ACTIVE' && (p.targetId === n1.id || p.targetId === n2.id));
-    if (activePact) {
-        executePartition(activePact);
-        return;
-    }
-
     // Determine winner/loser if applicable
     let winner = n1, loser = n2;
     if (n2.getMilitaryPower() > n1.getMilitaryPower()) {
@@ -6967,6 +7013,11 @@ function managePartitionPacts() {
             return;
         }
 
+        // 旧セーブデータとの互換性。新しい協定では開戦時の対象領土を記録する。
+        if (!pact.initialTargetTiles || pact.initialTargetTiles.length === 0) {
+            pact.initialTargetTiles = [...target.tiles];
+        }
+
         // 侵攻国同士が戦争状態になった場合、協定は破棄
         if (inv1.atWarWith.includes(inv2.id)) {
             pact.status = 'CANCELLED';
@@ -6980,12 +7031,27 @@ function managePartitionPacts() {
             return;
         }
 
-        // 共同侵攻による戦局悪化・降伏判定（安定度の低下、極端な戦力差、長期化）
-        const jointWarDuration = Math.max(getWarDuration(inv1, target), getWarDuration(inv2, target));
-        const targetPower = target.getMilitaryPower();
-        const combinedInvaderPower = inv1.getMilitaryPower() + inv2.getMilitaryPower();
+        // 片方でも先に講和した場合は、共同侵攻・分割の前提が崩れたので破棄する。
+        if (!inv1.atWarWith.includes(target.id) || !inv2.atWarWith.includes(target.id)) {
+            pact.status = 'CANCELLED';
+            log(`秘密協定破棄: ${pact.name}の共同侵攻条件が失われました。`, "log-war");
+            return;
+        }
 
-        if (target.stability < 30 || targetPower < combinedInvaderPower * 0.2 || jointWarDuration >= 15 || target.tiles.length < 10) {
+        // 戦力差や安定度だけでは分割しない。実際に両国が対象国へ進軍し、
+        // 対象国の領土を一定以上奪った「共同勝利」の後にだけ分割する。
+        const jointWarDuration = Math.max(getWarDuration(inv1, target), getWarDuration(inv2, target));
+        const initialTargetTiles = pact.initialTargetTiles;
+        const inv1Captured = initialTargetTiles.filter(tileIdx => ownerGrid[tileIdx] === inv1.id).length;
+        const inv2Captured = initialTargetTiles.filter(tileIdx => ownerGrid[tileIdx] === inv2.id).length;
+        const capturedTiles = inv1Captured + inv2Captured;
+        const requiredCapturedTiles = Math.max(2, Math.ceil(initialTargetTiles.length * 0.5));
+        const hasJointVictory = jointWarDuration >= 3 &&
+            inv1Captured >= 1 && inv2Captured >= 1 &&
+            capturedTiles >= requiredCapturedTiles &&
+            inv1.getMilitaryPower() + inv2.getMilitaryPower() > target.getMilitaryPower();
+
+        if (hasJointVictory) {
             executePartition(pact);
         }
     });
@@ -7045,6 +7111,7 @@ function managePartitionPacts() {
                     invader2Id: inv2.id,
                     targetId: target.id,
                     year: year,
+                    initialTargetTiles: [...target.tiles],
                     status: 'ACTIVE'
                 };
 

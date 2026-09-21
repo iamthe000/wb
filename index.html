@@ -213,6 +213,7 @@
             <div class="stat-row"><span>軍の質:</span> <span id="n-qual"></span></div>
             <button id="btn-history" style="margin-top:12px;">国家系譜を見る</button>
             <button id="btn-relations" style="margin-top:8px;">🌍 国際関係</button>
+            <button id="btn-command-attack" style="margin-top:8px; background:linear-gradient(135deg, #7f1d1d, #b91c1c); border-color:#f87171;">⚔️ この国に他国を攻めさせる</button>
         </div>
 
         <div class="panel">
@@ -297,6 +298,18 @@
     <div style="display:flex; gap:12px; margin-top: 16px;">
         <button id="btn-edit-save" style="margin-top: 0; background: linear-gradient(135deg, #064e3b, #047857); border-color: #10b981; flex:1;">保存</button>
         <button id="btn-edit-cancel" style="margin-top: 0; background: linear-gradient(135deg, #7f1d1d, #b91c1c); border-color: #f87171; flex:1;">キャンセル</button>
+    </div>
+</div>
+
+<div id="command-attack-modal" class="custom-modal" style="display:none; width:90%; max-width:400px;">
+    <h2>攻撃命令</h2>
+    <p id="command-attack-description" style="color:var(--text-secondary); margin:0 0 14px;"></p>
+    <label for="command-attack-target">攻撃対象</label>
+    <select id="command-attack-target" style="width:100%; margin-top:6px;"></select>
+    <p style="font-size:0.8em; color:#fca5a5; margin:12px 0 0;">この命令は外交関係や距離に関係なく、直ちに開戦させます。</p>
+    <div style="display:flex; gap:12px; margin-top:16px;">
+        <button id="btn-command-attack-confirm" style="margin-top:0; background:linear-gradient(135deg, #7f1d1d, #b91c1c); border-color:#f87171; flex:1;">開戦させる</button>
+        <button id="btn-command-attack-cancel" style="margin-top:0; flex:1;">キャンセル</button>
     </div>
 </div>
 
