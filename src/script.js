@@ -8195,16 +8195,40 @@ function loadGame(file) {
     const reader = new FileReader();
     reader.onload = (e) => {
         try {
-            const data = JSON.parse(e.target.result);
+            // UTF-8 BOM付きのファイルや、拡張子を変更したセーブも読めるようにする。
+            const text = typeof e.target.result === 'string' ? e.target.result.replace(/^\uFEFF/, '') : '';
+            const data = JSON.parse(text);
 
             // 破損ファイルや別形式の JSON を、途中まで反映してから失敗させない。
             const isArrayOfLength = (value, length) => Array.isArray(value) && value.length === length;
+            const mapLength = Number.isInteger(data && data.width) && Number.isInteger(data && data.height)
+                ? data.width * data.height : -1;
             if (!data || !Number.isInteger(data.width) || !Number.isInteger(data.height)
                 || data.width <= 0 || data.height <= 0
-                || !isArrayOfLength(data.grid, data.width * data.height)
-                || !isArrayOfLength(data.ownerGrid, data.width * data.height)
+                || mapLength > 4_000_000
+                || !isArrayOfLength(data.grid, mapLength)
+                || !isArrayOfLength(data.ownerGrid, mapLength)
                 || !Array.isArray(data.nations)) {
                 throw new Error('セーブデータの形式が正しくありません');
+            }
+
+            // マップ配列は数値以外を受け付けない。JSONのnull等が混じったファイルを
+            // 読み込むと、後段の描画・シミュレーションで別の例外になるためここで止める。
+            const isNumberArray = value => Array.isArray(value) && value.every(Number.isFinite);
+            if (!isNumberArray(data.grid) || !isNumberArray(data.ownerGrid)
+                || (data.elevationGrid !== undefined && !isNumberArray(data.elevationGrid))
+                || (data.militaryGrid !== undefined && !isNumberArray(data.militaryGrid))) {
+                throw new Error('マップデータが壊れています');
+            }
+
+            // 旧セーブには追加前の配列が存在しないことがある。
+            const loadedNations = data.nations;
+            if (loadedNations.some(n => !n || typeof n !== 'object' || !Number.isFinite(n.id))) {
+                throw new Error('国家データが壊れています');
+            }
+            const loadedAlliances = Array.isArray(data.alliances) ? data.alliances : [];
+            if (loadedAlliances.some(a => !a || typeof a !== 'object')) {
+                throw new Error('同盟データが壊れています');
             }
 
             width = data.width;
@@ -8217,7 +8241,7 @@ function loadGame(file) {
             militaryGrid = isArrayOfLength(data.militaryGrid, width * height)
                 ? data.militaryGrid : new Array(width * height).fill(0);
             ownerGrid = data.ownerGrid;
-            nations = data.nations;
+            nations = loadedNations;
             nationIdCounter = Number.isInteger(data.nationIdCounter) ? data.nationIdCounter : 0;
             alliances = Array.isArray(data.alliances) ? data.alliances : [];
             allianceIdCounter = Number.isInteger(data.allianceIdCounter) ? data.allianceIdCounter : 0;
@@ -8260,7 +8284,6 @@ function loadGame(file) {
             
             // Rehydrate
             nations.forEach(n => {
-                if (!n || typeof n !== 'object') throw new Error('国家データが壊れています');
                 Object.setPrototypeOf(n, Nation.prototype);
                 n.tiles = Array.isArray(n.tiles) ? n.tiles : [];
                 n.cities = Array.isArray(n.cities) ? n.cities : [];
@@ -8272,13 +8295,20 @@ function loadGame(file) {
                 n.warStartedAt = n.warStartedAt || {};
                 n.defensiveWins = n.defensiveWins || {};
                 n.isolationWarTargets = n.isolationWarTargets || {};
+                n.cities = n.cities.filter(c => c && typeof c === 'object');
                 n.cities.forEach(c => Object.setPrototypeOf(c, City.prototype));
             });
             alliances.forEach(a => {
                 Object.setPrototypeOf(a, Alliance.prototype);
+                a.members = Array.isArray(a.members) ? a.members : [];
+                a.history = Array.isArray(a.history) ? a.history : [];
                 a.updateCentroid();
             });
-            organizations.forEach(o => Object.setPrototypeOf(o, InternationalOrganization.prototype));
+            organizations.forEach(o => {
+                if (!o || typeof o !== 'object') throw new Error('国際機関データが壊れています');
+                Object.setPrototypeOf(o, InternationalOrganization.prototype);
+                o.members = Array.isArray(o.members) ? o.members : [];
+            });
             nations.forEach(n => n.updateCentroid());
             
             updateContinents();
@@ -8319,7 +8349,7 @@ function loadGame(file) {
             log("ゲームをロードしました。", "log-info");
         } catch(err) {
             console.error(err);
-            alert("ロードに失敗しました。");
+            alert(`ロードに失敗しました。\n${err && err.message ? err.message : 'ファイルを確認してください。'}`);
         }
     };
     reader.onerror = () => {
