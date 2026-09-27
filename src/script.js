@@ -8319,7 +8319,8 @@ function loadGame(file) {
             document.getElementById('info-tension').innerText = worldTension.toFixed(1) + "%";
             document.getElementById('top-ui-tension').innerText = worldTension.toFixed(1) + "%";
             document.getElementById('simSpeed').value = simSpeed;
-            updateSpecialAlliancesUI();
+            // 旧実装に残っていた未定義関数を呼ばない。設定UIは下でまとめて更新する。
+            updateGameRulesUI();
 
             const cEl = document.getElementById('info-concert');
             if (cEl) {
@@ -8345,7 +8346,6 @@ function loadGame(file) {
             isPaused = true;
             mapDirty = true;
             
-            updateGameRulesUI();
             log("ゲームをロードしました。", "log-info");
         } catch(err) {
             console.error(err);
