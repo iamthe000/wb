@@ -4103,6 +4103,7 @@ function handlePolitics(n) {
 
         const oldName = n.name;
         const oldGov = n.sysDetailed;
+        const inheritedBaseName = n.baseName;
         
         // 権威主義または軍事政権へ移行
         n.sysBroad = '権威主義';
@@ -4110,6 +4111,8 @@ function handlePolitics(n) {
         n.sovereign = (n.sysDetailed === '軍事評議会制') ? '軍部' : '独裁者';
         n.govType = n.sysDetailed;
 
+        // 政変では国家の固有名詞（地域名）を変えず、体制名だけを更新する。
+        if (isFixedProperNamesEnabled && inheritedBaseName) n.baseName = inheritedBaseName;
         n.updateName();
         n.stability = Math.max(0, n.stability - 30);
         log(`${oldName}で政変が発生！ ${oldGov}から${n.sysDetailed}へ体制が変わり、${n.name}となりました。`, "log-war");
@@ -4126,6 +4129,7 @@ function handlePolitics(n) {
         if (activeScenario === 'TOTALLER_KRIEG' && n.name === '枢軸国') return;
 
         const oldName = n.name;
+        const inheritedBaseName = n.baseName;
         
         n.sysBroad = '民主主義';
         n.sysDetailed = (Math.random() < 0.5) ? "議院内閣制" : "大統領制";
@@ -4134,6 +4138,7 @@ function handlePolitics(n) {
         n.govType = n.sysDetailed;
 
         n.regimeNumber++;
+        if (isFixedProperNamesEnabled && inheritedBaseName) n.baseName = inheritedBaseName;
         n.updateName();
         log(`${oldName}は近代化に伴い民主化し、${n.name}となりました。`, "log-peace");
         n.addHistory(`民主化: ${oldName} -> ${n.name}`);
@@ -4146,6 +4151,7 @@ function handlePolitics(n) {
         if (activeScenario === 'TOTALLER_KRIEG' && (n.name === '枢軸国' || n.name === '連合国')) return;
 
         const oldName = n.name;
+        const inheritedBaseName = n.baseName;
         n.sysBroad = '全体主義';
         n.sysDetailed = '前衛党独裁';
         n.sovereign = '党';
@@ -4153,6 +4159,7 @@ function handlePolitics(n) {
         n.govType = n.sysDetailed;
 
         n.stability = Math.min(100, n.stability + 30);
+        if (isFixedProperNamesEnabled && inheritedBaseName) n.baseName = inheritedBaseName;
         n.updateName();
         log(`${oldName}で社会主義革命が発生し、${n.name}となりました。`, "log-war");
         n.addHistory(`社会主義革命: ${oldName} -> ${n.name}`);
