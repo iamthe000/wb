@@ -197,9 +197,17 @@ let isSpecialAlliancesEnabled = true;
 let isEventModalEnabled = true;
 let isIslandDefenseEnabled = true;
 let isIsolationismEnabled = true;
+let isFixedProperNamesEnabled = false;
+let fixedProperNamePool = [];
 
 function isIsolationistNation(nation) {
     return isIsolationismEnabled && !!nation && nation.isIsolationist === true;
+}
+
+function captureFixedProperNamePool() {
+    fixedProperNamePool = [...new Set(nations
+        .filter(n => n && typeof n.baseName === 'string' && n.baseName.length > 0)
+        .map(n => n.baseName))];
 }
 
 let alliances = [];
@@ -414,6 +422,7 @@ function initGrid(size) {
     isWorldUnified = false;
     partitionPacts = [];
     pactIdCounter = 0;
+    fixedProperNamePool = [];
     isDrawing = true;
     year = 1;
     document.getElementById('log').innerHTML = '';
@@ -947,6 +956,15 @@ function setupInput() {
         });
     }
 
+    const btnToggleFixedProperNames = document.getElementById('btn-toggle-fixed-proper-names');
+    if (btnToggleFixedProperNames) {
+        btnToggleFixedProperNames.addEventListener('click', () => {
+            isFixedProperNamesEnabled = !isFixedProperNamesEnabled;
+            if (isFixedProperNamesEnabled) captureFixedProperNamePool();
+            updateGameRulesUI();
+        });
+    }
+
     // Map zoom & pan controls clicks
     function zoomToCenter(factor) {
         const newZoom = clamp(zoomLevel * factor, 0.5, 10.0);
@@ -994,6 +1012,12 @@ function updateGameRulesUI() {
     if (btnIsolationism) {
         btnIsolationism.innerText = isIsolationismEnabled ? 'オン' : 'オフ';
         btnIsolationism.style.background = isIsolationismEnabled ? '#27ae60' : '#c0392b';
+    }
+
+    const btnFixedProperNames = document.getElementById('btn-toggle-fixed-proper-names');
+    if (btnFixedProperNames) {
+        btnFixedProperNames.innerText = isFixedProperNamesEnabled ? 'オン' : 'オフ';
+        btnFixedProperNames.style.background = isFixedProperNamesEnabled ? '#27ae60' : '#c0392b';
     }
 }
 
@@ -1679,6 +1703,7 @@ function generateWorld() {
 
     // 2. 国家生成
     spawnNations();
+    if (isFixedProperNamesEnabled) captureFixedProperNamePool();
     
     // 3. 大陸情報の更新
     updateContinents();
@@ -2077,6 +2102,14 @@ class Nation {
     }
 
     generateBaseName() {
+        if (isFixedProperNamesEnabled && fixedProperNamePool.length > 0) {
+            // 固有名詞固定化中は、初期国家から採取した国名だけを再利用する。
+            // 未使用の名前を優先し、全て使用済みなら重複を許可して体制名で区別する。
+            const availableNames = fixedProperNamePool.filter(name => !isBaseNameTaken(name, this.id));
+            const namePool = availableNames.length > 0 ? availableNames : fixedProperNamePool;
+            return namePool[Math.floor(Math.random() * namePool.length)];
+        }
+
         if (this.cultureType === 'KANJI') {
             for(let i=0; i<100; i++) {
                 const len = Math.random() < 0.8 ? 2 : 3;
@@ -8170,6 +8203,7 @@ function saveGame() {
         alliedNationsId, hasShownAlliedNationsModal,
         isSpecialAlliancesEnabled, isEventModalEnabled,
         isIslandDefenseEnabled, isIsolationismEnabled,
+        isFixedProperNamesEnabled, fixedProperNamePool,
         frameCounter, simSpeed,
         concertDuration,
         concertMembers,
@@ -8274,6 +8308,10 @@ function loadGame(file) {
             isEventModalEnabled = data.isEventModalEnabled !== undefined ? data.isEventModalEnabled : true;
             isIslandDefenseEnabled = data.isIslandDefenseEnabled !== undefined ? data.isIslandDefenseEnabled : true;
             isIsolationismEnabled = data.isIsolationismEnabled !== undefined ? data.isIsolationismEnabled : true;
+            isFixedProperNamesEnabled = data.isFixedProperNamesEnabled === true;
+            fixedProperNamePool = Array.isArray(data.fixedProperNamePool)
+                ? [...new Set(data.fixedProperNamePool.filter(name => typeof name === 'string' && name.length > 0))]
+                : [];
             frameCounter = Number.isFinite(data.frameCounter) ? data.frameCounter : 0;
             simSpeed = Number.isFinite(data.simSpeed) ? data.simSpeed : 5;
             
@@ -8281,6 +8319,10 @@ function loadGame(file) {
             concertMembers = data.concertMembers || [];
             partitionPacts = data.partitionPacts || [];
             pactIdCounter = data.pactIdCounter || 0;
+
+            if (isFixedProperNamesEnabled && fixedProperNamePool.length === 0) {
+                captureFixedProperNamePool();
+            }
             
             // Rehydrate
             nations.forEach(n => {
