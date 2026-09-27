@@ -875,6 +875,8 @@ function setupInput() {
         n.stateStruct = document.getElementById('edit-n-struct').value;
         n.sovereign = document.getElementById('edit-n-sov').value;
         n.ecoIdeology = document.getElementById('edit-n-eco').value;
+        n.isIsolationist = document.getElementById('edit-n-isolationism').value === 'true';
+        if (n.isIsolationist) n.isolationismManual = true;
 
         // If changed to democracy and had no parties, generate them
         if (n.sysBroad === '民主主義' && (!n.parties || n.parties.length === 0)) {
@@ -1425,6 +1427,28 @@ function updateMilitaryGrid() {
             hotSpots.push({ idx: city.tileIdx, weight: idx === 0 ? 15 : 5 });
         });
 
+        // 孤立主義国は海外領土より本土所在島の防衛を優先する。
+        if (isDefensiveNation(n)) {
+            const homeIsland = getHomeIslandTiles(n);
+            if (homeIsland.size > 0) {
+                const capitalTile = n.cities.length > 0 ? n.cities[0].tileIdx : -1;
+                if (capitalTile >= 0 && homeIsland.has(capitalTile)) {
+                    hotSpots.push({ idx: capitalTile, weight: 45 });
+                }
+                homeIsland.forEach(tIdx => {
+                    const cx = tIdx % width;
+                    const cy = Math.floor(tIdx / width);
+                    const enemyAtBorder = [[0, 1], [0, -1], [1, 0], [-1, 0]].some(([dx, dy]) => {
+                        const nx = cx + dx, ny = cy + dy;
+                        if (nx < 0 || nx >= width || ny < 0 || ny >= height) return false;
+                        const owner = ownerGrid[ny * width + nx];
+                        return owner !== n.id && n.atWarWith.includes(owner);
+                    });
+                    if (enemyAtBorder) hotSpots.push({ idx: tIdx, weight: 35 });
+                });
+            }
+        }
+
         // 重点地区がない場合は首都またはランダムな領土を拠点にする
         if (hotSpots.length === 0) {
             if (n.cities.length > 0) {
@@ -1455,6 +1479,18 @@ function updateMilitaryGrid() {
             }
         });
     });
+
+    // 絶対値ではなく、現在の世界内での相対分布に正規化する。
+    // 後半に軍事力がインフレしても、上位約10%だけが最も濃く表示される。
+    const positiveValues = targetGrid.filter(value => value > 0).sort((a, b) => a - b);
+    if (positiveValues.length > 0) {
+        const referenceIndex = Math.min(
+            positiveValues.length - 1,
+            Math.max(0, Math.floor(positiveValues.length * 0.9))
+        );
+        const relativeReference = Math.max(positiveValues[referenceIndex], 0.0001);
+        targetGrid = targetGrid.map(value => Math.min(1, value / relativeReference));
+    }
 
     // 現在のグリッドをターゲットへ近づける (スムーズな移動)
     for (let i = 0; i < militaryGrid.length; i++) {
@@ -1917,6 +1953,10 @@ class Nation {
         
         this.govType = this.sysDetailed; // Backward compatibility
 
+        // 島国向け外交方針。領土生成後に自動判定される場合がある。
+        this.isIsolationist = false;
+        this.isolationismManual = false;
+
         // Grand Empire Logic (Rare Spawn)
         this.isGrandEmpire = false;
         if (Math.random() < 0.01) {
@@ -1952,6 +1992,9 @@ class Nation {
         this.atWarWith = []; // list of nation IDs
         // 相手国ごとの開戦年。講和条件と政変後の外交処理に使う。
         this.warStartedAt = {};
+        // 孤立主義国が各国との防衛戦で勝利した回数。
+        this.defensiveWins = {};
+        this.isolationWarTargets = {};
         // 大規模国家モードで独立を保つための、初期領土を基準にした規模。
         this.megaCoreTiles = 0;
         // 初期首都周辺の本土。独立国である間は一部を維持する。
@@ -2189,11 +2232,14 @@ class Nation {
         let tankBonus = 1 + (this.tanks * 0.05);
         let base = this.soldiers * this.soldierQuality * this.equipQuality * tankBonus * (1 + this.tech * 0.5);
         if (this.isGrandEmpire) base *= 5.0; // Monster buff
+        if (isDefensiveNation(this)) base *= 1.8;
         return base;
     }
 
     getNavalPower() {
-        return this.ships * (1 + this.tech * 0.5) * this.equipQuality;
+        let power = this.ships * (1 + this.tech * 0.5) * this.equipQuality;
+        if (isDefensiveNation(this)) power *= 1.8;
+        return power;
     }
 
     updateCentroid() {
@@ -2309,6 +2355,109 @@ class Nation {
     isSocialist() {
         return (this.sysDetailed === '前衛党独裁' || (this.ecoIdeology && (this.ecoIdeology.includes('計画') || this.ecoIdeology.includes('統制')) && this.sysBroad === '全体主義'));
     }
+
+    isIslandNation() {
+        if (this.tiles.length < 3) return false;
+        const landCount = grid.reduce((count, terrain) => count + (terrain !== 0 ? 1 : 0), 0);
+        if (this.tiles.length > Math.max(80, landCount * 0.22)) return false;
+        const tileSet = new Set(this.tiles);
+        let waterEdges = 0, foreignEdges = 0, boundaryEdges = 0;
+        for (const tile of this.tiles) {
+            const x = tile % width, y = Math.floor(tile / width);
+            for (const [dx, dy] of [[0,1],[0,-1],[1,0],[-1,0]]) {
+                const nx = x + dx, ny = y + dy;
+                if (nx < 0 || nx >= width || ny < 0 || ny >= height) {
+                    waterEdges++; boundaryEdges++; continue;
+                }
+                const neighbor = ny * width + nx;
+                if (grid[neighbor] === 0) waterEdges++;
+                else if (!tileSet.has(neighbor)) foreignEdges++;
+                if (!tileSet.has(neighbor)) boundaryEdges++;
+            }
+        }
+        return boundaryEdges > 0 && waterEdges / boundaryEdges >= 0.55 && foreignEdges / boundaryEdges <= 0.15;
+    }
+}
+
+function initializeIslandIsolationism() {
+    nations.forEach(n => {
+        if (n.isolationismManual || n.isIsolationist || !n.isIslandNation()) return;
+        if (Math.random() < 0.45) {
+            n.isIsolationist = true;
+            n.stability = Math.min(100, n.stability + 10);
+            n.addHistory('孤立主義の成立');
+            log(`${n.name}で孤立主義が成立しました。`, 'log-info');
+        }
+    });
+}
+
+// 政変・反乱・分裂で生まれる後継国家にも、親国家の外交方針を引き継がせる。
+function inheritIsolationism(parent, successor) {
+    successor.isIsolationist = parent.isIsolationist === true;
+    successor.isolationismManual = parent.isolationismManual === true || successor.isIsolationist;
+}
+
+function getLandComponentFromTile(startTile) {
+    if (startTile === undefined || startTile < 0 || grid[startTile] === 0) return new Set();
+    const component = new Set([startTile]);
+    const queue = [startTile];
+    for (let i = 0; i < queue.length; i++) {
+        const tile = queue[i];
+        const x = tile % width, y = Math.floor(tile / width);
+        for (const [dx, dy] of [[0,1],[0,-1],[1,0],[-1,0]]) {
+            const nx = x + dx, ny = y + dy;
+            if (nx < 0 || nx >= width || ny < 0 || ny >= height) continue;
+            const next = ny * width + nx;
+            if (grid[next] !== 0 && !component.has(next)) {
+                component.add(next);
+                queue.push(next);
+            }
+        }
+    }
+    return component;
+}
+
+function getHomeIslandTiles(home) {
+    if (!home) return new Set();
+    const start = home.cities.length > 0 ? home.cities[0].tileIdx : home.tiles[0];
+    const component = getLandComponentFromTile(start);
+    if (component.size === 0) return component;
+
+    // 所有権ではなく地形で判定する。外国に占領されても本島判定を失わない。
+    const totalLand = grid.reduce((count, terrain) => count + (terrain !== 0 ? 1 : 0), 0);
+    if (component.size > Math.max(300, totalLand * 0.35)) return new Set();
+
+    let boundary = 0;
+    let waterBoundary = 0;
+    component.forEach(tile => {
+        const x = tile % width, y = Math.floor(tile / width);
+        for (const [dx, dy] of [[0,1],[0,-1],[1,0],[-1,0]]) {
+            const nx = x + dx, ny = y + dy;
+            if (nx < 0 || nx >= width || ny < 0 || ny >= height) {
+                boundary++;
+                waterBoundary++;
+                continue;
+            }
+            const next = ny * width + nx;
+            if (grid[next] === 0) {
+                boundary++;
+                waterBoundary++;
+            }
+        }
+    });
+    if (boundary === 0 || waterBoundary / boundary < 0.45) return new Set();
+    return component;
+}
+
+// 島国と孤立主義国は、どちらも本土防衛を優先する国家として扱う。
+function isDefensiveNation(nation) {
+    return !!nation && (nation.isIsolationist === true || nation.isIslandNation());
+}
+
+function hasForeignTerritoryOnHomeIsland(home, foreign) {
+    const homeIsland = getHomeIslandTiles(home);
+    if (homeIsland.size === 0) return false;
+    return foreign.tiles.some(tile => homeIsland.has(tile));
 }
 
 function spawnNations() {
@@ -2682,6 +2831,8 @@ function spawnNations() {
         // 初期領土拡大 (Flood fill的)
         expandTerritoryInitial();
     }
+
+    initializeIslandIsolationism();
 }
 
 function expandTerritoryInitial() {
@@ -3409,9 +3560,8 @@ function renderMap() {
                 if (type === 3 || type === 4) { baseR=20; baseG=60; baseB=100; } // RIVER
 
                 if (density > 0) {
-                    // 密度に応じた色 (青 -> 緑 -> 黄 -> 赤)
-                    // densityの値を0-1にクランプして利用 (実際の値はそれ以上になりうるので調整)
-                    const d = Math.min(1, density / 2); 
+                    // 相対密度に応じた色 (青 -> 緑 -> 黄 -> 赤)
+                    const d = Math.min(1, density);
                     let r, g, b;
                     if (d < 0.25) {
                         r = baseR + (0 - baseR) * (d / 0.25);
@@ -3756,6 +3906,10 @@ function handlePolitics(n) {
         if ((n.isGrandEmpire || isLargeSocialist) && activeScenario !== 'TOTALLER_KRIEG') {
             let collapseProb = n.isGrandEmpire ? 0.9 : 0.4;
             let civilWarProb = n.isGrandEmpire ? 0.8 : 0.6;
+            if (n.isIsolationist) {
+                collapseProb *= 0.1;
+                civilWarProb *= 0.1;
+            }
             
             if (activeScenario === 'QUIET_SPARKS') {
                 collapseProb *= 0.1;
@@ -3786,7 +3940,7 @@ function handlePolitics(n) {
     // 安定度の自然変動
     if (n.atWarWith.length > 0) {
         // 民主主義は戦争疲弊が少ない
-        const stabLoss = (n.sysBroad === '民主主義') ? 0.2 : 0.4;
+        const stabLoss = ((n.sysBroad === '民主主義') ? 0.2 : 0.4) * (n.isIsolationist ? 0.35 : 1);
         n.stability -= stabLoss;
     } else {
         n.stability = Math.min(100, n.stability + 0.5);
@@ -3825,7 +3979,9 @@ function handlePolitics(n) {
             // 共和制(民主主義)の国は反乱確率を極端に下げる (0.005 -> 0.00005)
             // また、必要な不満度も引き上げる (75 -> 90)
             let rebelChance = (n.sysBroad === '民主主義') ? 0.00005 : 0.005;
+            if (n.isIsolationist) rebelChance *= 0.1;
             let unrestThreshold = (n.sysBroad === '民主主義') ? 90 : 75;
+            if (n.isIsolationist) unrestThreshold = Math.min(100, unrestThreshold + 10);
 
             if (activeScenario === 'QUIET_SPARKS') {
                 rebelChance /= 20;
@@ -3856,6 +4012,8 @@ function handlePolitics(n) {
     // 政変の判定
     let coupThreshold = (n.sysBroad === '民主主義') ? 40 : 50; // 民主制は崩壊しにくい
     let coupChance = (n.sysBroad === '民主主義') ? 0.0005 : 0.002;
+    if (n.isIsolationist) coupChance *= 0.2;
+    if (n.isIsolationist) coupThreshold -= 10;
 
     if (activeScenario === 'QUIET_SPARKS') {
         coupChance /= 10;
@@ -4121,6 +4279,7 @@ function grantIndependence(n, city) {
     if (activeScenario === 'TOTALLER_KRIEG') return;
 
     const newNation = new Nation();
+    inheritIsolationism(n, newNation);
     newNation.baseName = n.baseName;
     
     // 都市名を冠した国名
@@ -4211,6 +4370,7 @@ function triggerCityRebellion(n, cities) {
 
     // 反乱軍の生成
     const rebel = new Nation();
+    inheritIsolationism(n, rebel);
     rebel.baseName = n.baseName;
     rebel.parentName = n.baseName;
     rebel.isRebel = true;
@@ -4358,6 +4518,7 @@ function triggerCityRebellion(n, cities) {
 function triggerSuccessionCivilWar(n) {
     // Create the pretender nation
     const rebel = new Nation();
+    inheritIsolationism(n, rebel);
     rebel.baseName = n.baseName;
     rebel.isRebel = false; // Claims to be legitimate
     
@@ -4528,6 +4689,7 @@ function triggerImperialCollapse(n) {
     const warlords = [];
     centers.forEach((center, idx) => {
         const w = new Nation();
+        inheritIsolationism(n, w);
         w.tech = n.tech;
         w.religion = n.religion;
         w.ecoIdeology = n.ecoIdeology;
@@ -5236,10 +5398,12 @@ function simulateTick() {
         // 未開拓地の植民 (技術力・国力に応じて開拓スピードが向上)
         const gdpBonus = Math.min(0.08, (n.gdp / 5000) * 0.02);
         const industryBonus = Math.min(0.05, (n.industry / 200) * 0.01);
-        const colonizationChance = 0.01 + (n.tech * 0.02) + gdpBonus + industryBonus; // 技術+国力で最大約22%
-        if (n.tech >= 1 && Math.random() < colonizationChance) { 
+        const isolationColonizationFactor = n.isIsolationist ? 0.22 : 1;
+        const colonizationChance = (0.01 + (n.tech * 0.02) + gdpBonus + industryBonus) * isolationColonizationFactor; // 孤立主義国も低頻度で開拓
+        if (n.tech >= 1 && Math.random() < colonizationChance) {
             // 国力・技術力が高い国は1ターンに最大複数マス開拓可能
-            const maxTilesPerTurn = Math.min(3, 1 + Math.floor(n.tech / 2) + (n.gdp > 1000 ? 1 : 0));
+            const normalMaxTiles = Math.min(3, 1 + Math.floor(n.tech / 2) + (n.gdp > 1000 ? 1 : 0));
+            const maxTilesPerTurn = n.isIsolationist ? 1 : normalMaxTiles;
             let tilesColonized = 0;
 
             for (let step = 0; step < maxTilesPerTurn; step++) {
@@ -5298,31 +5462,40 @@ function simulateTick() {
         }
 
         // 都市の建設
-        if (n.tiles.length > (n.cities.length + 1) * 50 && Math.random() < 0.05) {
+        // 孤立主義国は海外拡張の代わりに、国内へ都市を次々に整備する。
+        const cityThreshold = n.isIsolationist ? 10 : 50;
+        const cityChance = n.isIsolationist ? 0.25 : 0.05;
+        if (n.tiles.length > (n.cities.length + 1) * cityThreshold && Math.random() < cityChance) {
             const potentialTiles = n.tiles.filter(t => !n.cities.some(c => c.tileIdx === t));
             if (potentialTiles.length > 0) {
                 const newTile = potentialTiles[Math.floor(Math.random() * potentialTiles.length)];
                 const cityName = n.generateCityName();
                 n.cities.push(new City(cityName, newTile, n.id));
+                if (n.isIsolationist) n.stability = Math.min(100, n.stability + 1);
                 log(`${n.name}が新たな都市「${cityName}」を建設しました。`, "log-info");
             }
         }
 
         // 人口増加: 領土面積と技術に基づくロジスティック回帰モデル
-        let capacity = n.tiles.length * 1000 * (1 + n.tech * 0.5);
-        let growth = 0.02 * (1 - n.pop / capacity);
+        let capacity = n.tiles.length * 1000 * (1 + n.tech * 0.5) * (n.isIsolationist ? 1.6 : 1);
+        let growth = (n.isIsolationist ? 0.03 : 0.02) * (1 - n.pop / capacity);
         if (growth < -0.01) growth = -0.01; // 急激な減少を抑える
         n.pop = Math.floor(n.pop * (1 + growth));
         
         // GDP成長: 工業力と人口、技術（人口依存度を下げる）
-        n.gdp += (n.industry * 2) + (n.pop * 0.002) * (1 + n.tech);
+        const domesticBonus = n.isIsolationist ? 1.75 : 1;
+        n.gdp += ((n.industry * 2) + (n.pop * 0.002) * (1 + n.tech)) * domesticBonus;
+        if (n.isIsolationist) {
+            n.industry += 0.25;
+            n.stability = Math.min(100, n.stability + 0.12);
+        }
         
         // 軍備増強: GDPの一部を軍事費へ
         let milBudget = n.gdp * 0.1;
         if (n.atWarWith.length > 0) milBudget = n.gdp * 0.3; // 戦時体制
 
         // 兵士雇用 / 維持
-        let desiredSoldiers = Math.floor(n.pop * 0.05); // 人口の5%が上限目安
+        let desiredSoldiers = Math.floor(n.pop * (n.isIsolationist ? 0.08 : 0.05)); // 人口の5%が上限目安
         if (n.soldiers < desiredSoldiers && milBudget > 0) {
             n.soldiers += 10;
             milBudget -= 10;
@@ -5348,9 +5521,12 @@ function simulateTick() {
         }
         
         // 海軍建造 (技術レベル2以上かつ海岸線がある場合)
-        if (n.tech >= 2 && milBudget > 150 && n.isCoastal()) {
+        const navalTechReady = n.isIsolationist ? n.tech >= 1 : n.tech >= 2;
+        const navalBudget = n.isIsolationist ? 80 : 150;
+        const navalTarget = n.isIsolationist ? 12 + n.tech * 12 : 0;
+        if (navalTechReady && milBudget > navalBudget && n.isCoastal() && (n.isIsolationist ? n.ships < navalTarget : true)) {
             n.ships++;
-            milBudget -= 100;
+            milBudget -= n.isIsolationist ? 60 : 100;
         }
 
         // 重心計算
@@ -5601,9 +5777,23 @@ function simulateTick() {
             });
         }
         
-        // 対象国を選ぶ (20%の確率で最も親密な国、80%でランダム)
+        // 本土所在島を占領している国は、島国の最優先開戦対象にする。
+        // 通常のランダム選択に任せると、関係が良い国を引いたターンは
+        // 防衛戦が先送りされるため、該当国を必ず選ぶ。
+        const homeIslandTiles = getHomeIslandTiles(n);
+        const homeIslandEnemy = homeIslandTiles.size > 0
+            ? nations.find(other =>
+                other.id !== n.id && !other.isDead
+                && !n.atWarWith.includes(other.id)
+                && other.tiles.some(tile => homeIslandTiles.has(tile))
+            )
+            : null;
+
+        // 対象国を選ぶ (本土占領国を優先、それ以外は従来通り)
         let target;
-        if (Math.random() < 0.2) {
+        if (homeIslandEnemy) {
+            target = homeIslandEnemy;
+        } else if (Math.random() < 0.2) {
             let bestRel = -101;
             let bestTarget = null;
             nations.forEach(other => {
@@ -5738,12 +5928,15 @@ function simulateTick() {
         // 戦争判定 (閾値を下げ、好戦的に)
         // 隣接しているか、あるいは海軍力があり両者が沿岸国であれば宣戦布告可能
         const canNavalInvade = (n.tech >= 3 && n.ships >= 20 && n.isCoastal() && target.isCoastal());
+        const hasHomeIslandEnemy = homeIslandEnemy?.id === target.id;
+        // 孤立主義国の対外行動は大幅に抑制するが、最低限の領土欲は残す。
+        if (isDefensiveNation(n) && !isNeighbor(n, target) && !hasHomeIslandEnemy && Math.random() > 0.05) return;
 
         // 経済大国(GDP>3000かつ自国の1.5倍以上)への攻撃は、軍事大国(軍事力1.5倍)か野心(帝国)、あるいは激怒(関係<-90)が必要
         if (target.gdp > 3000 && target.gdp > n.gdp * 1.5) {
              const isMilSuper = n.getMilitaryPower() > target.getMilitaryPower() * 1.5;
              // 攻撃側が軍事大国でもなく、野心的な帝国でもなく、関係が最悪でもない場合は戦争を回避
-             if (!isMilSuper && !n.isGrandEmpire && n.relations[target.id] > -90) {
+             if (!hasHomeIslandEnemy && !isMilSuper && !n.isGrandEmpire && n.relations[target.id] > -90) {
                  return; 
              }
         }
@@ -5751,12 +5944,13 @@ function simulateTick() {
         // 民主主義国同士の平和 (Democratic Peace Theory)
         // 双方が民主主義の場合、よほどの対立(関係<-80)や野心がない限り戦争を回避する
         if (n.sysBroad === '民主主義' && target.sysBroad === '民主主義') {
-            if (n.relations[target.id] > -80 && !n.isGrandEmpire) {
+            if (n.relations[target.id] > -80 && !n.isGrandEmpire && !hasHomeIslandEnemy) {
                 return;
             }
         }
         
-        let warThreshold = -50;
+        let warThreshold = isDefensiveNation(n) ? -85 : -50;
+        if (isDefensiveNation(n) && !isNeighbor(n, target)) warThreshold = -95;
         let isColdWar = false;
 
         if (isMegaNations) warThreshold = -70;
@@ -5776,8 +5970,10 @@ function simulateTick() {
             }
         }
 
-        if (n.relations[target.id] < warThreshold && (neighbor || canNavalInvade)) {
-            if (!n.atWarWith.includes(target.id)) {
+        const isHomeIslandDefenseWar = hasHomeIslandEnemy;
+        if ((isHomeIslandDefenseWar || n.relations[target.id] < warThreshold)
+            && (isHomeIslandDefenseWar || neighbor || canNavalInvade)) {
+                if (!n.atWarWith.includes(target.id)) {
                 // 傀儡国は主人に逆らわない
                 if (n.isPuppet && n.masterId === target.id) return;
                 // 主人は傀儡国を攻撃しない
@@ -5785,7 +5981,7 @@ function simulateTick() {
                 // 傀儡国同士は戦わない
                 if (n.isPuppet && target.isPuppet && n.masterId === target.masterId && n.masterId !== -1) return;
                 // 同盟国には攻撃しない (関係が極悪でない限り)
-                if (n.allies.includes(target.id) && n.relations[target.id] > -50) return;
+                if (!isHomeIslandDefenseWar && n.allies.includes(target.id) && n.relations[target.id] > -50) return;
 
                 declareWar(n, target);
             }
@@ -5813,6 +6009,12 @@ function simulateTick() {
             ambitionChance = n.isGrandEmpire ? 0.04 : 0.01;
         }
 
+        if (isDefensiveNation(n)) {
+            // 孤立主義国は国境防衛を優先し、よほど有利でも攻勢に出にくい。
+            ambitionThreshold += 1.0;
+            ambitionChance *= 0.05;
+        }
+
         if ((neighbor || canNavalInvade) && n.getMilitaryPower() > target.getMilitaryPower() * ambitionThreshold && Math.random() < ambitionChance) {
             if (!n.atWarWith.includes(target.id)) {
                 // 傀儡国は主人に逆らわない
@@ -5828,8 +6030,22 @@ function simulateTick() {
                 declareWar(n, target);
             }
         }
+
+        // 自国の島に外国領が存在する場合は、孤立主義でも即時に排除戦争へ移行する。
+        if (isDefensiveNation(n) && hasHomeIslandEnemy && !n.atWarWith.includes(target.id)) {
+            n.isolationWarTargets = n.isolationWarTargets || {};
+            n.isolationWarTargets[target.id] = true;
+            n.relations[target.id] = -100;
+            declareWar(n, target, false, true);
+        }
         // 和平判定
         else if (n.atWarWith.includes(target.id)) {
+            if (isDefensiveNation(n) && n.isolationWarTargets && n.isolationWarTargets[target.id] && !hasForeignTerritoryOnHomeIsland(n, target)) {
+                concludePeace(n, target, 'ISLAND_EXPEL');
+                delete n.isolationWarTargets[target.id];
+                if (target.isolationWarTargets) delete target.isolationWarTargets[n.id];
+                return;
+            }
             let peaceChance = (activeScenario === 'MEGA_NATIONS') ? 0.03 : 0.005; // 基礎和平確率 (大規模国家モードでは講和しやすくする)
             const warDuration = getWarDuration(n, target);
             if (isMegaNations) {
@@ -5940,7 +6156,7 @@ function simulateTick() {
                 battle(attacker, defender);
             } else {
                 // 非隣接国への上陸作戦
-                if (attacker.tech >= 3 && Math.random() < 0.1) {
+                if (!isDefensiveNation(attacker) && attacker.tech >= 3 && Math.random() < 0.1) {
                     navalLanding(attacker, defender);
                 }
             }
@@ -6534,9 +6750,15 @@ function declareWar(n1, n2, isIntervention = false, force = false) {
 function concludePeace(n1, n2, type) {
     // Determine winner/loser if applicable
     let winner = n1, loser = n2;
+    if (type === 'ISLAND_EXPEL') {
+        winner = isDefensiveNation(n1) ? n1 : n2;
+        loser = winner.id === n1.id ? n2 : n1;
+    }
     if (n2.getMilitaryPower() > n1.getMilitaryPower()) {
-        winner = n2;
-        loser = n1;
+        if (type !== 'ISLAND_EXPEL') {
+            winner = n2;
+            loser = n1;
+        }
     }
 
     // 徹底抗戦シナリオ: 完全決着(傀儡化)以外はすべて拒否して戦争継続
@@ -6551,7 +6773,28 @@ function concludePeace(n1, n2, type) {
     if (n1.warStartedAt) delete n1.warStartedAt[n2.id];
     if (n2.warStartedAt) delete n2.warStartedAt[n1.id];
 
-    if (type === 'WHITE_PEACE') {
+    if (type === 'ISLAND_EXPEL') {
+        const startTile = winner.cities.length > 0 ? winner.cities[0].tileIdx : winner.tiles[0];
+        const homeIsland = getLandComponentFromTile(startTile);
+        const expelledTiles = loser.tiles.filter(tile => homeIsland.has(tile));
+        expelledTiles.forEach(tile => {
+            ownerGrid[tile] = winner.id;
+            winner.tiles.push(tile);
+        });
+        loser.tiles = loser.tiles.filter(tile => !homeIsland.has(tile));
+        for (let i = loser.cities.length - 1; i >= 0; i--) {
+            if (homeIsland.has(loser.cities[i].tileIdx)) {
+                const city = loser.cities[i];
+                city.nationId = winner.id;
+                winner.cities.push(city);
+                loser.cities.splice(i, 1);
+            }
+        }
+        log(`島嶼防衛講和: ${loser.name}は${winner.name}の島から撤退し、島外領土は併合されずに現状維持となりました。`, "log-peace");
+        winner.addHistory(`島嶼防衛講和: ${loser.name}を本土島から排除`);
+        loser.addHistory(`島嶼防衛講和: ${winner.name}の島から撤退`);
+        mapDirty = true;
+    } else if (type === 'WHITE_PEACE') {
         log(`白紙講和: ${n1.name}と${n2.name}が現状維持で停戦しました。`, "log-peace");
         n1.addHistory(`白紙講和: ${n2.name}と停戦`);
         n2.addHistory(`白紙講和: ${n1.name}と停戦`);
@@ -6844,6 +7087,7 @@ function concludePeace(n1, n2, type) {
                 // 新しい傀儡国の生成 (idx >= 1)
                 for (let idx = 1; idx < maxPuppets; idx++) {
                     const newPuppet = new Nation();
+                    inheritIsolationism(loser, newPuppet);
                     
                     // 中心の都市名をもとに基本名を決定
                     const capCity = puppetCenters[idx];
@@ -7451,7 +7695,10 @@ function manageAlliedNations() {
 function battle(attacker, defender) {
     // 攻撃側のパワー vs 防御側のパワー + 地形ボーナス
     const atkPow = attacker.getMilitaryPower() * (0.8 + Math.random()*0.4);
-    const defPow = defender.getMilitaryPower() * (0.8 + Math.random()*0.4); // 防御有利なしの消耗戦
+    const isHomeIslandDefense = isDefensiveNation(defender)
+        && hasForeignTerritoryOnHomeIsland(defender, attacker);
+    const defenseBonus = isHomeIslandDefense ? 2.5 : 1;
+    const defPow = defender.getMilitaryPower() * defenseBonus * (0.8 + Math.random()*0.4);
 
     // どちらかが領土を奪う
     // 攻撃側が圧倒的に強い場合
@@ -7468,6 +7715,20 @@ function battle(attacker, defender) {
     } else {
         // 攻撃失敗、兵を失う
         attacker.soldiers = Math.max(0, Math.floor(attacker.soldiers * 0.98));
+        recordDefensiveVictory(defender, attacker);
+    }
+}
+
+function recordDefensiveVictory(defender, attacker) {
+    if (!isDefensiveNation(defender) || !defender.atWarWith.includes(attacker.id)) return;
+    defender.defensiveWins = defender.defensiveWins || {};
+    defender.defensiveWins[attacker.id] = (defender.defensiveWins[attacker.id] || 0) + 1;
+    const wins = defender.defensiveWins[attacker.id];
+    if (wins >= 3) {
+        log(`${defender.name}は${attacker.name}の侵攻を${wins}度退け、白紙講和を提案しました。`, "log-peace");
+        concludePeace(defender, attacker, 'WHITE_PEACE');
+        delete defender.defensiveWins[attacker.id];
+        delete attacker.defensiveWins?.[defender.id];
     }
 }
 
@@ -7476,7 +7737,7 @@ function navalLanding(attacker, defender) {
     if (attacker.ships < 20) return; // ある程度の海軍力が必要
 
     const atkNaval = attacker.getNavalPower() * (0.8 + Math.random()*0.4);
-    const defNaval = defender.getNavalPower() * (0.8 + Math.random()*0.4);
+    const defNaval = defender.getNavalPower() * (0.8 + Math.random()*0.4) * (isDefensiveNation(defender) ? 5 : 1);
 
     if (atkNaval > defNaval) {
         // 上陸成功: 敵の海岸タイルを1つ奪う
@@ -7485,6 +7746,7 @@ function navalLanding(attacker, defender) {
     } else {
         // 上陸失敗: 海軍力消耗
         attacker.ships = Math.max(0, Math.floor(attacker.ships * 0.8));
+        recordDefensiveVictory(defender, attacker);
     }
 }
 
@@ -7855,7 +8117,7 @@ function saveGame() {
         version: 1,
         width, height,
         currentScenario, activeScenario,
-        grid, elevationGrid, ownerGrid,
+        grid, elevationGrid, militaryGrid, ownerGrid,
         nations, nationIdCounter,
         alliances, allianceIdCounter,
         organizations, orgIdCounter,
@@ -7889,35 +8151,50 @@ function saveGame() {
 }
 
 function loadGame(file) {
+    if (!file) return;
+
     const reader = new FileReader();
     reader.onload = (e) => {
         try {
             const data = JSON.parse(e.target.result);
-            
+
+            // 破損ファイルや別形式の JSON を、途中まで反映してから失敗させない。
+            const isArrayOfLength = (value, length) => Array.isArray(value) && value.length === length;
+            if (!data || !Number.isInteger(data.width) || !Number.isInteger(data.height)
+                || data.width <= 0 || data.height <= 0
+                || !isArrayOfLength(data.grid, data.width * data.height)
+                || !isArrayOfLength(data.ownerGrid, data.width * data.height)
+                || !Array.isArray(data.nations)) {
+                throw new Error('セーブデータの形式が正しくありません');
+            }
+
             width = data.width;
             height = data.height;
-            currentScenario = data.currentScenario;
-            activeScenario = data.activeScenario;
+            currentScenario = data.currentScenario || 'BLITZKRIEG';
+            activeScenario = data.activeScenario || currentScenario;
             grid = data.grid;
-            elevationGrid = data.elevationGrid;
+            elevationGrid = isArrayOfLength(data.elevationGrid, width * height)
+                ? data.elevationGrid : new Array(width * height).fill(0);
+            militaryGrid = isArrayOfLength(data.militaryGrid, width * height)
+                ? data.militaryGrid : new Array(width * height).fill(0);
             ownerGrid = data.ownerGrid;
             nations = data.nations;
-            nationIdCounter = data.nationIdCounter;
-            alliances = data.alliances || [];
-            allianceIdCounter = data.allianceIdCounter || 0;
-            organizations = data.organizations || [];
-            orgIdCounter = data.orgIdCounter || 0;
-            year = data.year;
-            worldTension = data.worldTension;
+            nationIdCounter = Number.isInteger(data.nationIdCounter) ? data.nationIdCounter : 0;
+            alliances = Array.isArray(data.alliances) ? data.alliances : [];
+            allianceIdCounter = Number.isInteger(data.allianceIdCounter) ? data.allianceIdCounter : 0;
+            organizations = Array.isArray(data.organizations) ? data.organizations : [];
+            orgIdCounter = Number.isInteger(data.orgIdCounter) ? data.orgIdCounter : 0;
+            year = Number.isFinite(data.year) ? data.year : 1;
+            worldTension = Number.isFinite(data.worldTension) ? data.worldTension : 0;
             hasExperiencedHighWorldTension = data.hasExperiencedHighWorldTension !== undefined
                 ? data.hasExperiencedHighWorldTension
                 : worldTension >= 70;
             isUnitedNationsEstablished = data.isUnitedNationsEstablished !== undefined
                 ? data.isUnitedNationsEstablished
                 : organizations.some(org => org.name === UNITED_NATIONS_NAME);
-            hegemonId = data.hegemonId;
-            hegemonStatus = data.hegemonStatus;
-            highTensionDuration = data.highTensionDuration;
+            hegemonId = Number.isInteger(data.hegemonId) ? data.hegemonId : -1;
+            hegemonStatus = data.hegemonStatus || '';
+            highTensionDuration = Number.isFinite(data.highTensionDuration) ? data.highTensionDuration : 0;
             isDemocracyAwakened = data.isDemocracyAwakened || false;
             isSocialismSprouted = data.isSocialismSprouted || false;
             isDemocracyDefeated = data.isDemocracyDefeated || false;
@@ -7932,8 +8209,8 @@ function loadGame(file) {
             hasShownAlliedNationsModal = data.hasShownAlliedNationsModal || false;
             isSpecialAlliancesEnabled = data.isSpecialAlliancesEnabled !== undefined ? data.isSpecialAlliancesEnabled : true;
             isEventModalEnabled = data.isEventModalEnabled !== undefined ? data.isEventModalEnabled : true;
-            frameCounter = data.frameCounter;
-            simSpeed = data.simSpeed;
+            frameCounter = Number.isFinite(data.frameCounter) ? data.frameCounter : 0;
+            simSpeed = Number.isFinite(data.simSpeed) ? data.simSpeed : 5;
             
             concertDuration = data.concertDuration !== undefined ? data.concertDuration : 0;
             concertMembers = data.concertMembers || [];
@@ -7942,8 +8219,18 @@ function loadGame(file) {
             
             // Rehydrate
             nations.forEach(n => {
+                if (!n || typeof n !== 'object') throw new Error('国家データが壊れています');
                 Object.setPrototypeOf(n, Nation.prototype);
+                n.tiles = Array.isArray(n.tiles) ? n.tiles : [];
+                n.cities = Array.isArray(n.cities) ? n.cities : [];
+                n.relations = n.relations && typeof n.relations === 'object' ? n.relations : {};
+                n.atWarWith = Array.isArray(n.atWarWith) ? n.atWarWith : [];
+                n.allies = Array.isArray(n.allies) ? n.allies : [];
+                n.isIsolationist = n.isIsolationist === true;
+                n.isolationismManual = n.isolationismManual === true;
                 n.warStartedAt = n.warStartedAt || {};
+                n.defensiveWins = n.defensiveWins || {};
+                n.isolationWarTargets = n.isolationWarTargets || {};
                 n.cities.forEach(c => Object.setPrototypeOf(c, City.prototype));
             });
             alliances.forEach(a => {
@@ -7993,6 +8280,9 @@ function loadGame(file) {
             console.error(err);
             alert("ロードに失敗しました。");
         }
+    };
+    reader.onerror = () => {
+        alert("ファイルの読み込みに失敗しました。");
     };
     reader.readAsText(file);
 }
@@ -8072,6 +8362,7 @@ function openEditNationModal() {
     
     populateSelect('edit-n-eco', POLITICAL_SYSTEMS.ECONOMIC);
     document.getElementById('edit-n-eco').value = n.ecoIdeology;
+    document.getElementById('edit-n-isolationism').value = n.isIsolationist ? 'true' : 'false';
     
     updateEditPreview();
     modal.style.display = 'block';
