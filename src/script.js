@@ -195,6 +195,12 @@ let alliedNationsId = -1;
 let hasShownAlliedNationsModal = false;
 let isSpecialAlliancesEnabled = true;
 let isEventModalEnabled = true;
+let isIslandDefenseEnabled = true;
+let isIsolationismEnabled = true;
+
+function isIsolationistNation(nation) {
+    return isIsolationismEnabled && !!nation && nation.isIsolationist === true;
+}
 
 let alliances = [];
 let allianceIdCounter = 0;
@@ -925,6 +931,22 @@ function setupInput() {
         });
     }
 
+    const btnToggleIslandDefense = document.getElementById('btn-toggle-island-defense');
+    if (btnToggleIslandDefense) {
+        btnToggleIslandDefense.addEventListener('click', () => {
+            isIslandDefenseEnabled = !isIslandDefenseEnabled;
+            updateGameRulesUI();
+        });
+    }
+
+    const btnToggleIsolationism = document.getElementById('btn-toggle-isolationism');
+    if (btnToggleIsolationism) {
+        btnToggleIsolationism.addEventListener('click', () => {
+            isIsolationismEnabled = !isIsolationismEnabled;
+            updateGameRulesUI();
+        });
+    }
+
     // Map zoom & pan controls clicks
     function zoomToCenter(factor) {
         const newZoom = clamp(zoomLevel * factor, 0.5, 10.0);
@@ -960,6 +982,18 @@ function updateGameRulesUI() {
     if (btnSpecialAlliances) {
         btnSpecialAlliances.innerText = isSpecialAlliancesEnabled ? 'オン' : 'オフ';
         btnSpecialAlliances.style.background = isSpecialAlliancesEnabled ? '#27ae60' : '#c0392b';
+    }
+
+    const btnIslandDefense = document.getElementById('btn-toggle-island-defense');
+    if (btnIslandDefense) {
+        btnIslandDefense.innerText = isIslandDefenseEnabled ? 'オン' : 'オフ';
+        btnIslandDefense.style.background = isIslandDefenseEnabled ? '#27ae60' : '#c0392b';
+    }
+
+    const btnIsolationism = document.getElementById('btn-toggle-isolationism');
+    if (btnIsolationism) {
+        btnIsolationism.innerText = isIsolationismEnabled ? 'オン' : 'オフ';
+        btnIsolationism.style.background = isIsolationismEnabled ? '#27ae60' : '#c0392b';
     }
 }
 
@@ -2380,8 +2414,9 @@ class Nation {
 }
 
 function initializeIslandIsolationism() {
+    if (!isIsolationismEnabled) return;
     nations.forEach(n => {
-        if (n.isolationismManual || n.isIsolationist || !n.isIslandNation()) return;
+        if (n.isolationismManual || isIsolationistNation(n) || !n.isIslandNation()) return;
         if (Math.random() < 0.45) {
             n.isIsolationist = true;
             n.stability = Math.min(100, n.stability + 10);
@@ -2451,7 +2486,10 @@ function getHomeIslandTiles(home) {
 
 // 島国と孤立主義国は、どちらも本土防衛を優先する国家として扱う。
 function isDefensiveNation(nation) {
-    return !!nation && (nation.isIsolationist === true || nation.isIslandNation());
+    if (!nation) return false;
+    const islandDefense = isIslandDefenseEnabled && nation.isIslandNation();
+    const isolationistDefense = isIsolationismEnabled && nation.isIsolationist === true;
+    return islandDefense || isolationistDefense;
 }
 
 function hasForeignTerritoryOnHomeIsland(home, foreign) {
@@ -3906,7 +3944,7 @@ function handlePolitics(n) {
         if ((n.isGrandEmpire || isLargeSocialist) && activeScenario !== 'TOTALLER_KRIEG') {
             let collapseProb = n.isGrandEmpire ? 0.9 : 0.4;
             let civilWarProb = n.isGrandEmpire ? 0.8 : 0.6;
-            if (n.isIsolationist) {
+            if (isIsolationistNation(n)) {
                 collapseProb *= 0.1;
                 civilWarProb *= 0.1;
             }
@@ -3940,7 +3978,7 @@ function handlePolitics(n) {
     // 安定度の自然変動
     if (n.atWarWith.length > 0) {
         // 民主主義は戦争疲弊が少ない
-        const stabLoss = ((n.sysBroad === '民主主義') ? 0.2 : 0.4) * (n.isIsolationist ? 0.35 : 1);
+    const stabLoss = ((n.sysBroad === '民主主義') ? 0.2 : 0.4) * (isIsolationistNation(n) ? 0.35 : 1);
         n.stability -= stabLoss;
     } else {
         n.stability = Math.min(100, n.stability + 0.5);
@@ -3979,9 +4017,9 @@ function handlePolitics(n) {
             // 共和制(民主主義)の国は反乱確率を極端に下げる (0.005 -> 0.00005)
             // また、必要な不満度も引き上げる (75 -> 90)
             let rebelChance = (n.sysBroad === '民主主義') ? 0.00005 : 0.005;
-            if (n.isIsolationist) rebelChance *= 0.1;
+            if (isIsolationistNation(n)) rebelChance *= 0.1;
             let unrestThreshold = (n.sysBroad === '民主主義') ? 90 : 75;
-            if (n.isIsolationist) unrestThreshold = Math.min(100, unrestThreshold + 10);
+            if (isIsolationistNation(n)) unrestThreshold = Math.min(100, unrestThreshold + 10);
 
             if (activeScenario === 'QUIET_SPARKS') {
                 rebelChance /= 20;
@@ -4012,8 +4050,8 @@ function handlePolitics(n) {
     // 政変の判定
     let coupThreshold = (n.sysBroad === '民主主義') ? 40 : 50; // 民主制は崩壊しにくい
     let coupChance = (n.sysBroad === '民主主義') ? 0.0005 : 0.002;
-    if (n.isIsolationist) coupChance *= 0.2;
-    if (n.isIsolationist) coupThreshold -= 10;
+    if (isIsolationistNation(n)) coupChance *= 0.2;
+    if (isIsolationistNation(n)) coupThreshold -= 10;
 
     if (activeScenario === 'QUIET_SPARKS') {
         coupChance /= 10;
@@ -5398,12 +5436,12 @@ function simulateTick() {
         // 未開拓地の植民 (技術力・国力に応じて開拓スピードが向上)
         const gdpBonus = Math.min(0.08, (n.gdp / 5000) * 0.02);
         const industryBonus = Math.min(0.05, (n.industry / 200) * 0.01);
-        const isolationColonizationFactor = n.isIsolationist ? 0.22 : 1;
+        const isolationColonizationFactor = isIsolationistNation(n) ? 0.22 : 1;
         const colonizationChance = (0.01 + (n.tech * 0.02) + gdpBonus + industryBonus) * isolationColonizationFactor; // 孤立主義国も低頻度で開拓
         if (n.tech >= 1 && Math.random() < colonizationChance) {
             // 国力・技術力が高い国は1ターンに最大複数マス開拓可能
             const normalMaxTiles = Math.min(3, 1 + Math.floor(n.tech / 2) + (n.gdp > 1000 ? 1 : 0));
-            const maxTilesPerTurn = n.isIsolationist ? 1 : normalMaxTiles;
+            const maxTilesPerTurn = isIsolationistNation(n) ? 1 : normalMaxTiles;
             let tilesColonized = 0;
 
             for (let step = 0; step < maxTilesPerTurn; step++) {
@@ -5463,29 +5501,29 @@ function simulateTick() {
 
         // 都市の建設
         // 孤立主義国は海外拡張の代わりに、国内へ都市を次々に整備する。
-        const cityThreshold = n.isIsolationist ? 10 : 50;
-        const cityChance = n.isIsolationist ? 0.25 : 0.05;
+        const cityThreshold = isIsolationistNation(n) ? 10 : 50;
+        const cityChance = isIsolationistNation(n) ? 0.25 : 0.05;
         if (n.tiles.length > (n.cities.length + 1) * cityThreshold && Math.random() < cityChance) {
             const potentialTiles = n.tiles.filter(t => !n.cities.some(c => c.tileIdx === t));
             if (potentialTiles.length > 0) {
                 const newTile = potentialTiles[Math.floor(Math.random() * potentialTiles.length)];
                 const cityName = n.generateCityName();
                 n.cities.push(new City(cityName, newTile, n.id));
-                if (n.isIsolationist) n.stability = Math.min(100, n.stability + 1);
+                if (isIsolationistNation(n)) n.stability = Math.min(100, n.stability + 1);
                 log(`${n.name}が新たな都市「${cityName}」を建設しました。`, "log-info");
             }
         }
 
         // 人口増加: 領土面積と技術に基づくロジスティック回帰モデル
-        let capacity = n.tiles.length * 1000 * (1 + n.tech * 0.5) * (n.isIsolationist ? 1.6 : 1);
-        let growth = (n.isIsolationist ? 0.03 : 0.02) * (1 - n.pop / capacity);
+        let capacity = n.tiles.length * 1000 * (1 + n.tech * 0.5) * (isIsolationistNation(n) ? 1.6 : 1);
+        let growth = (isIsolationistNation(n) ? 0.03 : 0.02) * (1 - n.pop / capacity);
         if (growth < -0.01) growth = -0.01; // 急激な減少を抑える
         n.pop = Math.floor(n.pop * (1 + growth));
         
         // GDP成長: 工業力と人口、技術（人口依存度を下げる）
-        const domesticBonus = n.isIsolationist ? 1.75 : 1;
+        const domesticBonus = isIsolationistNation(n) ? 1.75 : 1;
         n.gdp += ((n.industry * 2) + (n.pop * 0.002) * (1 + n.tech)) * domesticBonus;
-        if (n.isIsolationist) {
+        if (isIsolationistNation(n)) {
             n.industry += 0.25;
             n.stability = Math.min(100, n.stability + 0.12);
         }
@@ -5495,7 +5533,7 @@ function simulateTick() {
         if (n.atWarWith.length > 0) milBudget = n.gdp * 0.3; // 戦時体制
 
         // 兵士雇用 / 維持
-        let desiredSoldiers = Math.floor(n.pop * (n.isIsolationist ? 0.08 : 0.05)); // 人口の5%が上限目安
+        let desiredSoldiers = Math.floor(n.pop * (isIsolationistNation(n) ? 0.08 : 0.05)); // 人口の5%が上限目安
         if (n.soldiers < desiredSoldiers && milBudget > 0) {
             n.soldiers += 10;
             milBudget -= 10;
@@ -5521,12 +5559,12 @@ function simulateTick() {
         }
         
         // 海軍建造 (技術レベル2以上かつ海岸線がある場合)
-        const navalTechReady = n.isIsolationist ? n.tech >= 1 : n.tech >= 2;
-        const navalBudget = n.isIsolationist ? 80 : 150;
-        const navalTarget = n.isIsolationist ? 12 + n.tech * 12 : 0;
-        if (navalTechReady && milBudget > navalBudget && n.isCoastal() && (n.isIsolationist ? n.ships < navalTarget : true)) {
+        const navalTechReady = isIsolationistNation(n) ? n.tech >= 1 : n.tech >= 2;
+        const navalBudget = isIsolationistNation(n) ? 80 : 150;
+        const navalTarget = isIsolationistNation(n) ? 12 + n.tech * 12 : 0;
+        if (navalTechReady && milBudget > navalBudget && n.isCoastal() && (isIsolationistNation(n) ? n.ships < navalTarget : true)) {
             n.ships++;
-            milBudget -= n.isIsolationist ? 60 : 100;
+            milBudget -= isIsolationistNation(n) ? 60 : 100;
         }
 
         // 重心計算
@@ -8131,6 +8169,7 @@ function saveGame() {
         internationalAllianceId, internationalVersion, hasShownInternationalModal,
         alliedNationsId, hasShownAlliedNationsModal,
         isSpecialAlliancesEnabled, isEventModalEnabled,
+        isIslandDefenseEnabled, isIsolationismEnabled,
         frameCounter, simSpeed,
         concertDuration,
         concertMembers,
@@ -8209,6 +8248,8 @@ function loadGame(file) {
             hasShownAlliedNationsModal = data.hasShownAlliedNationsModal || false;
             isSpecialAlliancesEnabled = data.isSpecialAlliancesEnabled !== undefined ? data.isSpecialAlliancesEnabled : true;
             isEventModalEnabled = data.isEventModalEnabled !== undefined ? data.isEventModalEnabled : true;
+            isIslandDefenseEnabled = data.isIslandDefenseEnabled !== undefined ? data.isIslandDefenseEnabled : true;
+            isIsolationismEnabled = data.isIsolationismEnabled !== undefined ? data.isIsolationismEnabled : true;
             frameCounter = Number.isFinite(data.frameCounter) ? data.frameCounter : 0;
             simSpeed = Number.isFinite(data.simSpeed) ? data.simSpeed : 5;
             
