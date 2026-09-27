@@ -210,6 +210,13 @@ function captureFixedProperNamePool() {
         .map(n => n.baseName))];
 }
 
+function getFixedProperName(excludeId = -1) {
+    if (!isFixedProperNamesEnabled || fixedProperNamePool.length === 0) return null;
+    const availableNames = fixedProperNamePool.filter(name => !isBaseNameTaken(name, excludeId));
+    const namePool = availableNames.length > 0 ? availableNames : fixedProperNamePool;
+    return namePool[Math.floor(Math.random() * namePool.length)];
+}
+
 let alliances = [];
 let allianceIdCounter = 0;
 let organizations = [];
@@ -960,7 +967,7 @@ function setupInput() {
     if (btnToggleFixedProperNames) {
         btnToggleFixedProperNames.addEventListener('click', () => {
             isFixedProperNamesEnabled = !isFixedProperNamesEnabled;
-            if (isFixedProperNamesEnabled) captureFixedProperNamePool();
+            if (isFixedProperNamesEnabled && fixedProperNamePool.length === 0) captureFixedProperNamePool();
             updateGameRulesUI();
         });
     }
@@ -2102,13 +2109,8 @@ class Nation {
     }
 
     generateBaseName() {
-        if (isFixedProperNamesEnabled && fixedProperNamePool.length > 0) {
-            // 固有名詞固定化中は、初期国家から採取した国名だけを再利用する。
-            // 未使用の名前を優先し、全て使用済みなら重複を許可して体制名で区別する。
-            const availableNames = fixedProperNamePool.filter(name => !isBaseNameTaken(name, this.id));
-            const namePool = availableNames.length > 0 ? availableNames : fixedProperNamePool;
-            return namePool[Math.floor(Math.random() * namePool.length)];
-        }
+        const fixedName = getFixedProperName(this.id);
+        if (fixedName) return fixedName;
 
         if (this.cultureType === 'KANJI') {
             for(let i=0; i<100; i++) {
@@ -2148,6 +2150,10 @@ class Nation {
     }
 
     updateName() {
+        const fixedName = getFixedProperName(this.id);
+        if (fixedName && !fixedProperNamePool.includes(this.baseName)) {
+            this.baseName = fixedName;
+        }
         const nameInfo = getNationSuffix(this);
         let proposedName = nameInfo.prefix + this.baseName + nameInfo.suffix;
 
@@ -4394,6 +4400,10 @@ function grantIndependence(n, city) {
     newNation.color = `hsl(${Math.random()*360}, 60%, 60%)`;
     newNation.tech = n.tech;
     newNation.religion = n.religion;
+    if (isFixedProperNamesEnabled && fixedProperNamePool.length > 0) {
+        newNation.baseName = getFixedProperName(newNation.id);
+        newNation.updateName();
+    }
 
     // 領土と都市の委譲 (自然な国境)
     const targetSize = 130;
@@ -4547,6 +4557,10 @@ function triggerCityRebellion(n, cities) {
     rebel.color = `hsl(${Math.random()*360}, 80%, 40%)`;
     rebel.tech = n.tech;
     rebel.religion = n.religion;
+    if (isFixedProperNamesEnabled && fixedProperNamePool.length > 0) {
+        rebel.baseName = getFixedProperName(rebel.id);
+        rebel.updateName();
+    }
     
     // 領土と都市の委譲 (自然な国境)
     const targetPerCity = 130;
