@@ -4791,9 +4791,10 @@ function triggerImperialCollapse(n) {
             const city = center.obj;
             // Remove suffixes like 市, 府, etc
             const prefix = city.name.replace(/[市府京都港要塞]+$/, "");
-            w.baseName = prefix;
+            // 固有名詞固定化中は、分裂元の国名を継承する。
+            w.baseName = isFixedProperNamesEnabled ? n.baseName : prefix;
         } else {
-             w.baseName = w.generateBaseName();
+             w.baseName = isFixedProperNamesEnabled ? n.baseName : w.generateBaseName();
         }
         w.updateName();
 
@@ -7176,7 +7177,9 @@ function concludePeace(n1, n2, type) {
                     
                     // 中心の都市名をもとに基本名を決定
                     const capCity = puppetCenters[idx];
-                    newPuppet.baseName = capCity.name.replace(/府|市|領|国|共和国|王国|帝国/g, "");
+                    newPuppet.baseName = isFixedProperNamesEnabled
+                        ? loser.baseName
+                        : capCity.name.replace(/府|市|領|国|共和国|王国|帝国/g, "");
                     if (!newPuppet.baseName) {
                         newPuppet.baseName = loser.baseName + "臨時";
                     }
